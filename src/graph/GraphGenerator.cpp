@@ -3,21 +3,24 @@
 #include <algorithm>
 #include <numeric>
 #include <vector>
+#include <random>
 
 namespace od::graph {
 
-void assignStubbornVertices(Graph& graph, int numStubborn, std::mt19937& rng) {
-    int totalVertices = graph.getNumVertices();
-    if (numStubborn <= 0 || numStubborn > totalVertices) {
-        return;
-    }
 
-    std::vector<int> indices(totalVertices);
-    std::iota(indices.begin(), indices.end(), 0);
-    std::shuffle(indices.begin(), indices.end(), rng);
+void assignStubbornVertices(Graph& graph, int numStubborn, std::mt19937& rng) {
+    int originalCount = graph.getNumVertices();
+    if (originalCount == 0) {
+        throw std::logic_error("Нельзя прикрепить упрямую вершину к пустому графу");
+    }
+    std::uniform_int_distribution<int> dist(0, originalCount - 1);
+    std::uniform_real_distribution<double> weightDist(0.0, 1.0);
 
     for (int i = 0; i < numStubborn; ++i) {
-        graph.setStubborn(indices[i], true);
+        int neighbor = dist(rng);
+        int v = graph.addVertex();
+        graph.addEdge(v, neighbor, weightDist(rng));
+        graph.setStubborn(v, true);
     }
 }
 
