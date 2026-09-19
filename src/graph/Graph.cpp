@@ -18,14 +18,22 @@ void Graph::addEdge(int from, int to, double weight) {
     checkVertex(from);
     checkVertex(to);
 
-    adjacency_[static_cast<size_t>(from)].push_back(Edge{to, weight});
+    adjacency_[static_cast<size_t>(from)][to] = weight;
 
     if (from != to) {
-        adjacency_[static_cast<size_t>(to)].push_back(Edge{from, weight});
+        adjacency_[static_cast<size_t>(to)][from] = weight;
     }
 }
 
-const std::vector<Edge>& Graph::getNeighbors(int vertex) const {
+bool Graph::hasEdge(int from, int to) const {
+    checkVertex(from);
+    checkVertex(to);
+
+    const auto& neighbors = adjacency_[static_cast<size_t>(from)];
+    return neighbors.find(to) != neighbors.end();
+}
+
+const std::unordered_map<int, double>& Graph::getNeighbors(int vertex) const {
     checkVertex(vertex);
 
     return adjacency_[static_cast<size_t>(vertex)];
@@ -49,4 +57,12 @@ void Graph::checkVertex(int vertex) const {
     }
 }
 
+int Graph::addVertex() {
+    int index = numVertices_;
+    ++numVertices_;
+    adjacency_.emplace_back();
+    stubborn_.push_back(false);
+    return index;
 }
+
+} // namespace od::graph
