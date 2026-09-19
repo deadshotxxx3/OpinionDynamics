@@ -87,11 +87,30 @@ void collectDynamicEdgesSettings(ManualGenConfig& cnf){
     }else {cnf.p0 = 0.0; cnf.k = 0;}
 }
 
+void collectOpinionModelSettings(ManualGenConfig& cnf){
+    while (true) {
+        auto val = od::io::readDoubleInRange("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+        if (!val.has_value()) continue;
+        cnf.k1 = *val;
+        break;
+    }
+
+    while (true) {
+        auto val = od::io::readDoubleInRange(
+            "Введите порог k2 (" + std::to_string(cnf.k1) + "..1.0): ",
+            cnf.k1, 1.0);
+        if (!val.has_value()) continue;
+        cnf.k2 = *val;
+        break;
+    }
+}
+
 ManualGenConfig collectManualGenConfig(){
     ManualGenConfig cnf;
     collectLevels(cnf);
     collectStubbornSettings(cnf);
     collectDynamicEdgesSettings(cnf);
+    collectOpinionModelSettings(cnf);
     return cnf;
 }
 
@@ -132,6 +151,13 @@ ValidationResult validateConfig(const ManualGenConfig& config){
         if (config.k < -5.0 || config.k > 5.0){
             return {false, "Коэффициент k должен быть в диапазоне [-5.0, 5.0]"};
         }
+    }
+
+    if (config.k1 < 0.0 || config.k1 > 1.0 || config.k2 < 0.0 || config.k2 > 1.0) {
+        return {false, "k1 и k2 должны быть в диапазоне [0.0, 1.0]"};
+    }
+    if (config.k1 >= config.k2) {
+        return {false, "k1 должен быть меньше k2"};
     }
 
     return {true, ""};

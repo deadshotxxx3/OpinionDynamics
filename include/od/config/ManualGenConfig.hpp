@@ -18,8 +18,9 @@ struct ManualGenConfig {
     bool dynamicEdges;
     double p0;
     double k;
+    double k1;
+    double k2;
 };
-
 struct ValidationResult {
     bool isValid;
     std::string errorMessage;
@@ -28,6 +29,7 @@ struct ValidationResult {
 void collectLevels(ManualGenConfig& cnf);   
 void collectStubbornSettings(ManualGenConfig& cnf);
 void collectDynamicEdgesSettings(ManualGenConfig& cnf);
+void collectOpinionModelSettings(ManualGenConfig& cnf);
 
 ManualGenConfig collectManualGenConfig();
 ValidationResult validateConfig(const ManualGenConfig& config);
