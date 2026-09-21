@@ -1,11 +1,46 @@
 #include "od/config/ManualGenConfig.hpp"
 #include "od/graph/GraphGenerator.hpp"
+#include "od/io/GraphIO.hpp"
 #include "od/model/DynamicsModel.hpp"
 #include "od/model/EdgeEvolution.hpp"
 
 #include <iostream>
 #include <random>
 #include <vector>
+
+// Собирает базовую статистику графа для сравнения до/после save-load.
+struct GraphStats {
+    int numVertices = 0;
+    long long numEdges = 0;
+    int stubbornCount = 0;
+    double avgDegree = 0.0;
+};
+
+GraphStats computeStats(const od::graph::Graph& graph) {
+    GraphStats stats;
+    stats.numVertices = graph.getNumVertices();
+
+    long long totalDegree = 0;
+    for (int v = 0; v < stats.numVertices; ++v) {
+        totalDegree += static_cast<long long>(graph.getNeighbors(v).size());
+        if (graph.isStubborn(v)) {
+            ++stats.stubbornCount;
+        }
+    }
+    stats.numEdges = totalDegree / 2;
+    stats.avgDegree = stats.numVertices > 0
+        ? static_cast<double>(totalDegree) / stats.numVertices
+        : 0.0;
+    return stats;
+}
+
+void printStats(const std::string& label, const GraphStats& stats) {
+    std::cout << "--- " << label << " ---\n";
+    std::cout << "Вершин: " << stats.numVertices << "\n";
+    std::cout << "Рёбер: " << stats.numEdges << "\n";
+    std::cout << "Упрямых вершин: " << stats.stubbornCount << "\n";
+    std::cout << "Средняя степень: " << stats.avgDegree << "\n\n";
+}
 
 int main() {
     auto cnf = od::config::collectManualGenConfig();
@@ -19,56 +54,43 @@ int main() {
 
     od::graph::Graph graph = od::graph::generateManualGraph(cnf);
 
-    int numVertices = graph.getNumVertices();
-    long long totalDegree = 0;
-    int stubbornCount = 0;
-    for (int v = 0; v < numVertices; ++v) {
-        totalDegree += static_cast<long long>(graph.getNeighbors(v).size());
-        if (graph.isStubborn(v)) {
-            ++stubbornCount;
-        }
-    }
-    long long numEdges = totalDegree / 2;
-    double avgDegree = numVertices > 0
-        ? static_cast<double>(totalDegree) / numVertices
-        : 0.0;
+    GraphStats originalStats = computeStats(graph);
+    printStats("Статистика графа (сгенерированный)", originalStats);
 
-    std::cout << "=== Статистика графа ===\n";
-    std::cout << "Вершин: " << numVertices << "\n";
-    std::cout << "Рёбер: " << numEdges << "\n";
-    std::cout << "Упрямых вершин: " << stubbornCount << "\n";
-    std::cout << "Средняя степень: " << avgDegree << "\n\n";
+    // === Проверка сохранения/загрузки ===
+    const std::string SAVE_FILENAME = "graph_dump.txt";
 
-    const int SMALL_GRAPH_THRESHOLD = 20;
-    if (numVertices <= SMALL_GRAPH_THRESHOLD) {
-        std::cout << "=== Список смежности ===\n";
-        for (int v = 0; v < numVertices; ++v) {
-            std::cout << "Вершина " << v;
-            if (graph.isStubborn(v)) {
-                std::cout << " [упрямая]";
-            }
-            std::cout << ": ";
-            const auto& neighbors = graph.getNeighbors(v);
-            if (neighbors.empty()) {
-                std::cout << "(нет соседей)";
-            }
-            for (const auto& [neighborId, weight] : neighbors) {
-                std::cout << neighborId << "(w=" << weight << ") ";
-            }
-            std::cout << "\n";
+    std::cout << "=== Проверка save/load ===\n";
+    try {
+        od::io::saveGraph(graph, SAVE_FILENAME);
+        std::cout << "Граф сохранён в файл: " << SAVE_FILENAME << "\n";
+
+        od::graph::Graph loadedGraph = od::io::loadGraph(SAVE_FILENAME);
+        std::cout << "Граф загружен обратно из файла.\n\n";
+
+        GraphStats loadedStats = computeStats(loadedGraph);
+        printStats("Статистика графа (загруженный)", loadedStats);
+
+        bool matches = (originalStats.numVertices == loadedStats.numVertices) &&
+                        (originalStats.numEdges == loadedStats.numEdges) &&
+                        (originalStats.stubbornCount == loadedStats.stubbornCount);
+
+        if (matches) {
+            std::cout << "OK: статистика совпадает, save/load работает корректно.\n\n";
+        } else {
+            std::cout << "ОШИБКА: статистика НЕ совпадает! Проверьте saveGraph/loadGraph.\n\n";
         }
-    } else {
-        std::cout << "Граф слишком большой для подробного вывода (>"
-                   << SMALL_GRAPH_THRESHOLD << " вершин). Показана только статистика выше.\n";
+    } catch (const std::exception& e) {
+        std::cout << "ОШИБКА при save/load: " << e.what() << "\n\n";
     }
 
-    //Симуляция
+    // === Симуляция (на исходном графе, как раньше) ===
     std::vector<int> opinions = od::model::initOpinions(graph);
     std::mt19937 rng(std::random_device{}());
 
     const int T_MAX = 500;
 
-    std::cout << "\n=== Параметры симуляции ===\n";
+    std::cout << "=== Параметры симуляции ===\n";
     std::cout << "T_MAX = " << T_MAX << "\n";
     std::cout << "k1 = " << cnf.k1 << ", k2 = " << cnf.k2 << "\n";
     if (cnf.dynamicEdges) {
@@ -82,7 +104,7 @@ int main() {
         if (v == 1) ++initialOnes;
     }
     std::cout << "Начальное состояние: мнение 1 у " << initialOnes
-              << " (упрямых " << stubbornCount << ")\n\n";
+              << " (упрямых " << originalStats.stubbornCount << ")\n\n";
 
     std::cout << "=== Симуляция ===\n";
 
