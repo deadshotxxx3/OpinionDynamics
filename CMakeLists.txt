@@ -10,6 +10,7 @@ add_executable(opinion_dynamics
     src/main.cpp
     src/config/ManualGenConfig.cpp
     src/io/InputHelpers.cpp
+    src/io/GraphIO.cpp
     src/graph/Graph.cpp
     src/graph/GraphGenerator.cpp
     src/model/DynamicsModel.cpp
