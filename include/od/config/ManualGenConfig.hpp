@@ -15,6 +15,8 @@ struct ManualGenConfig {
     std::vector<LevelConfig> components;
     bool generateStubborn;
     int numStubbornVertices;
+    bool stubbornManualAttach;
+    std::vector<int> stubbornTargets;
     bool dynamicEdges;
     double p0;
     double k;

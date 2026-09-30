@@ -1,9 +1,11 @@
 #include "od/config/ManualGenConfig.hpp"
 #include "od/io/InputHelpers.hpp"
+#include <algorithm>
 #include <iostream>
 #include <string>
 
 const int MAX_VERTICAL = 10000;
+const int MAX_MANUAL_ATTACH = 100;
 
 namespace od::config {
 
@@ -57,16 +59,51 @@ void collectLevels(ManualGenConfig& cnf){
 
 void collectStubbornSettings(ManualGenConfig& cnf){
     cnf.generateStubborn = od::io::readYesNo("Нужны ли упрямые вершины. Введите y/n: ");
-    if (cnf.generateStubborn){
-        int cntComp = 0;
-        for (const auto& item : cnf.components) cntComp += item.numVertices;
-        while (true) {
-            auto val = od::io::readIntInRange("Введите кол-во упрямых вершин от 1 до " + std::to_string(cntComp) + ": ", 1, cntComp);
-            if (!val.has_value()) continue;
-            cnf.numStubbornVertices = *val;
-            break;
+
+    if (!cnf.generateStubborn){
+        cnf.numStubbornVertices = 0;
+        cnf.stubbornManualAttach = false;
+        cnf.stubbornTargets.clear();
+        return;
+    }
+
+    int totalVertices = 0;
+    for (const auto& item : cnf.components) totalVertices += item.numVertices;
+
+    while (true) {
+        auto val = od::io::readIntInRange(
+            "Введите кол-во упрямых вершин от 1 до " + std::to_string(totalVertices) + ": ",
+            1, totalVertices);
+        if (!val.has_value()) continue;
+        cnf.numStubbornVertices = *val;
+        break;
+    }
+
+    cnf.stubbornManualAttach = od::io::readYesNo(
+        "Прикрепить упрямые вручную или случайно? (y - вручную, n - случайно): ");
+
+    if (cnf.stubbornManualAttach && cnf.numStubbornVertices > MAX_MANUAL_ATTACH){
+        std::cout << "Ручное прикрепление ограничено " << MAX_MANUAL_ATTACH
+                  << " вершинами. Для " << cnf.numStubbornVertices
+                  << " будет использовано случайное прикрепление.\n";
+        cnf.stubbornManualAttach = false;
+    }
+
+    cnf.stubbornTargets.clear();
+    if (cnf.stubbornManualAttach){
+        cnf.stubbornTargets.reserve(static_cast<size_t>(cnf.numStubbornVertices));
+        for (int i = 0; i < cnf.numStubbornVertices; ++i){
+            std::string prompt = "К какой вершине прикрепить упрямую #"
+                                 + std::to_string(i + 1) + " (0.."
+                                 + std::to_string(totalVertices - 1) + "): ";
+            while (true){
+                auto val = od::io::readIntInRange(prompt, 0, totalVertices - 1);
+                if (!val.has_value()) continue;
+                cnf.stubbornTargets.push_back(*val);
+                break;
+            }
         }
-    }else cnf.numStubbornVertices = 0;
+    }
 }
 
 void collectDynamicEdgesSettings(ManualGenConfig& cnf){
@@ -195,6 +232,16 @@ ValidationResult validateConfig(const ManualGenConfig& config){
     if (config.generateStubborn){
         if (config.numStubbornVertices < 1 || config.numStubbornVertices > totalVertices){
             return {false, "Количество упрямых вершин должно быть от 1 до общего числа вершин"};
+        }
+        if (config.stubbornManualAttach){
+            if (static_cast<int>(config.stubbornTargets.size()) != config.numStubbornVertices){
+                return {false, "Число целей для упрямых вершин не совпадает с их количеством"};
+            }
+            for (int idx : config.stubbornTargets){
+                if (idx < 0 || idx >= totalVertices){
+                    return {false, "Индекс цели для упрямой вершины вне диапазона"};
+                }
+            }
         }
     }
 

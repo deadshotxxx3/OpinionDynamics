@@ -1,23 +1,40 @@
 #include "od/graph/GraphGenerator.hpp"
 
 #include <algorithm>
-#include <numeric>
+#include <stdexcept>
 #include <vector>
 #include <random>
 
 namespace od::graph {
 
-
-void assignStubbornVertices(Graph& graph, int numStubborn, std::mt19937& rng) {
+void assignStubbornVertices(
+    Graph& graph,
+    int numStubborn,
+    bool manualAttach,
+    const std::vector<int>& targets,
+    std::mt19937& rng
+) {
     int originalCount = graph.getNumVertices();
     if (originalCount == 0) {
         throw std::logic_error("Нельзя прикрепить упрямую вершину к пустому графу");
     }
+
+    if (manualAttach) {
+        if (static_cast<int>(targets.size()) != numStubborn) {
+            throw std::invalid_argument("assignStubbornVertices: размер targets не совпадает с numStubborn");
+        }
+        for (int idx : targets) {
+            if (idx < 0 || idx >= originalCount) {
+                throw std::out_of_range("assignStubbornVertices: индекс цели вне диапазона");
+            }
+        }
+    }
+
     std::uniform_int_distribution<int> dist(0, originalCount - 1);
     std::uniform_real_distribution<double> weightDist(0.0, 1.0);
 
     for (int i = 0; i < numStubborn; ++i) {
-        int neighbor = dist(rng);
+        int neighbor = manualAttach ? targets[static_cast<size_t>(i)] : dist(rng);
         int v = graph.addVertex();
         graph.addEdge(v, neighbor, weightDist(rng));
         graph.setStubborn(v, true);
@@ -76,10 +93,15 @@ Graph generateManualGraph(const od::config::ManualGenConfig& config) {
     }
 
     if (config.generateStubborn) {
-        assignStubbornVertices(graph, config.numStubbornVertices, rng);
+        assignStubbornVertices(
+            graph,
+            config.numStubbornVertices,
+            config.stubbornManualAttach,
+            config.stubbornTargets,
+            rng);
     }
 
     return graph;
 }
 
-}
+} // namespace od::graph
