@@ -1,14 +1,17 @@
 #include "od/config/ManualGenConfig.hpp"
 #include "od/graph/GraphGenerator.hpp"
 #include "od/io/GraphIO.hpp"
+#include "od/io/InputHelpers.hpp"
 #include "od/model/DynamicsModel.hpp"
 #include "od/model/EdgeEvolution.hpp"
 
+#include <cstdlib>
 #include <iostream>
 #include <random>
+#include <string>
+#include <utility>
 #include <vector>
 
-// Собирает базовую статистику графа для сравнения до/после save-load.
 struct GraphStats {
     int numVertices = 0;
     long long numEdges = 0;
@@ -42,49 +45,126 @@ void printStats(const std::string& label, const GraphStats& stats) {
     std::cout << "Средняя степень: " << stats.avgDegree << "\n\n";
 }
 
-int main() {
-    auto cnf = od::config::collectManualGenConfig();
+struct SimulationParams {
+    double k1 = 0.0;
+    double k2 = 1.0;
+    bool dynamicEdges = false;
+    double p0 = 0.0;
+    double k = 0.0;
+};
 
-    auto result = od::config::validateConfig(cnf);
-    if (!result.isValid) {
-        std::cout << "Ошибка конфигурации: " << result.errorMessage << "\n";
-        return 1;
+SimulationParams collectSimulationParamsStandalone() {
+    SimulationParams sp;
+
+    while (true) {
+        auto val = od::io::readDoubleInRange("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+        if (!val.has_value()) continue;
+        sp.k1 = *val;
+        break;
     }
-    std::cout << "Конфиг корректен.\n\n";
+    while (true) {
+        auto val = od::io::readDoubleInRange(
+            "Введите порог k2 (" + std::to_string(sp.k1) + "..1.0): ", sp.k1, 1.0);
+        if (!val.has_value()) continue;
+        sp.k2 = *val;
+        break;
+    }
 
-    od::graph::Graph graph = od::graph::generateManualGraph(cnf);
-
-    GraphStats originalStats = computeStats(graph);
-    printStats("Статистика графа (сгенерированный)", originalStats);
-
-    // === Проверка сохранения/загрузки ===
-    const std::string SAVE_FILENAME = "graph_dump.txt";
-
-    std::cout << "=== Проверка save/load ===\n";
-    try {
-        od::io::saveGraph(graph, SAVE_FILENAME);
-        std::cout << "Граф сохранён в файл: " << SAVE_FILENAME << "\n";
-
-        od::graph::Graph loadedGraph = od::io::loadGraph(SAVE_FILENAME);
-        std::cout << "Граф загружен обратно из файла.\n\n";
-
-        GraphStats loadedStats = computeStats(loadedGraph);
-        printStats("Статистика графа (загруженный)", loadedStats);
-
-        bool matches = (originalStats.numVertices == loadedStats.numVertices) &&
-                        (originalStats.numEdges == loadedStats.numEdges) &&
-                        (originalStats.stubbornCount == loadedStats.stubbornCount);
-
-        if (matches) {
-            std::cout << "OK: статистика совпадает, save/load работает корректно.\n\n";
-        } else {
-            std::cout << "ОШИБКА: статистика НЕ совпадает! Проверьте saveGraph/loadGraph.\n\n";
+    sp.dynamicEdges = od::io::readYesNo("Нужна ли динамика рёбер? Введите y/n: ");
+    if (sp.dynamicEdges) {
+        while (true) {
+            auto val = od::io::readDoubleInRange("Введите начальную вероятность p0 (0.0..1.0): ", 0.0, 1.0);
+            if (!val.has_value()) continue;
+            sp.p0 = *val;
+            break;
         }
-    } catch (const std::exception& e) {
-        std::cout << "ОШИБКА при save/load: " << e.what() << "\n\n";
+        while (true) {
+            auto val = od::io::readDoubleInRange("Введите коэффициент k (-5.0..5.0): ", -5.0, 5.0);
+            if (!val.has_value()) continue;
+            sp.k = *val;
+            break;
+        }
+    } else {
+        sp.p0 = 0.0;
+        sp.k = 0.0;
     }
 
-    // === Симуляция (на исходном графе, как раньше) ===
+    return sp;
+}
+
+std::pair<od::graph::Graph, SimulationParams> setupGraphAndParams() {
+    std::cout << "Выберите способ получения графа:\n";
+    std::cout << "1 - Сгенерировать новый граф\n";
+    std::cout << "2 - Загрузить граф из файла\n";
+
+    int choice;
+    while (true) {
+        auto val = od::io::readIntInRange("Ввод: ", 1, 2);
+        if (!val.has_value()) continue;
+        choice = *val;
+        break;
+    }
+
+    if (choice == 1) {
+        auto mode = od::config::chooseGenerationMode();
+
+        od::config::ManualGenConfig cnf = (mode == od::config::GenerationMode::Manual)
+            ? od::config::collectManualGenConfig()
+            : od::config::collectGeneralGenConfig();
+
+        auto result = od::config::validateConfig(cnf);
+        if (!result.isValid) {
+            std::cout << "Ошибка конфигурации: " << result.errorMessage << "\n";
+            std::exit(1);
+        }
+        std::cout << "Конфиг корректен.\n\n";
+
+        od::graph::Graph graph = od::graph::generateManualGraph(cnf);
+
+        SimulationParams sp{cnf.k1, cnf.k2, cnf.dynamicEdges, cnf.p0, cnf.k};
+
+        bool wantSave = od::io::readYesNo("Сохранить граф в файл? Введите y/n: ");
+        if (wantSave) {
+            std::cout << "Введите имя файла: ";
+            std::string filename;
+            std::getline(std::cin, filename);
+            filename = od::io::trim(filename);
+            try {
+                od::io::saveGraph(graph, filename);
+                std::cout << "Граф сохранён в " << filename << "\n\n";
+            } catch (const std::exception& e) {
+                std::cout << "Ошибка сохранения: " << e.what() << "\n\n";
+            }
+        }
+
+        return {std::move(graph), sp};
+    } else {
+        std::cout << "Введите имя файла для загрузки: ";
+        std::string filename;
+        std::getline(std::cin, filename);
+        filename = od::io::trim(filename);
+
+        try {
+            od::graph::Graph graph = od::io::loadGraph(filename);
+            std::cout << "Граф успешно загружен из " << filename << "\n\n";
+
+            std::cout << "Граф загружен без параметров симуляции - введите их отдельно.\n";
+            SimulationParams sp = collectSimulationParamsStandalone();
+
+            return {std::move(graph), sp};
+        } catch (const std::exception& e) {
+            std::cout << "Ошибка загрузки: " << e.what() << "\n";
+            std::exit(1);
+        }
+    }
+}
+
+int main() {
+    auto [graph, sp] = setupGraphAndParams();
+
+    GraphStats stats = computeStats(graph);
+    printStats("Статистика графа", stats);
+
     std::vector<int> opinions = od::model::initOpinions(graph);
     std::mt19937 rng(std::random_device{}());
 
@@ -92,9 +172,9 @@ int main() {
 
     std::cout << "=== Параметры симуляции ===\n";
     std::cout << "T_MAX = " << T_MAX << "\n";
-    std::cout << "k1 = " << cnf.k1 << ", k2 = " << cnf.k2 << "\n";
-    if (cnf.dynamicEdges) {
-        std::cout << "dynamicEdges: p0 = " << cnf.p0 << ", k = " << cnf.k << "\n";
+    std::cout << "k1 = " << sp.k1 << ", k2 = " << sp.k2 << "\n";
+    if (sp.dynamicEdges) {
+        std::cout << "dynamicEdges: p0 = " << sp.p0 << ", k = " << sp.k << "\n";
     } else {
         std::cout << "dynamicEdges: выключены\n";
     }
@@ -104,17 +184,17 @@ int main() {
         if (v == 1) ++initialOnes;
     }
     std::cout << "Начальное состояние: мнение 1 у " << initialOnes
-              << " (упрямых " << originalStats.stubbornCount << ")\n\n";
+              << " (упрямых " << stats.stubbornCount << ")\n\n";
 
     std::cout << "=== Симуляция ===\n";
 
     for (int t = 0; t < T_MAX; ++t) {
-        if (cnf.dynamicEdges) {
-            double currentP = od::model::linearProbability(cnf.p0, cnf.k, t);
+        if (sp.dynamicEdges) {
+            double currentP = od::model::linearProbability(sp.p0, sp.k, t);
             od::model::evolveEdges(graph, currentP, rng);
         }
 
-        opinions = od::model::stepOpinions(graph, opinions, cnf.k1, cnf.k2, rng);
+        opinions = od::model::stepOpinions(graph, opinions, sp.k1, sp.k2, rng);
 
         int ones = 0;
         for (int v : opinions) {

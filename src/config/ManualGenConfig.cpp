@@ -5,7 +5,7 @@
 
 const int MAX_VERTICAL = 10000;
 
-namespace od::config{
+namespace od::config {
 
 static void collectLevelDetails(ManualGenConfig& cnf){
     int cnt_io_comp = 0;
@@ -45,7 +45,7 @@ static void collectLevelDetails(ManualGenConfig& cnf){
 void collectLevels(ManualGenConfig& cnf){
     while (true){
         auto val = od::io::readIntInRange("Введите кол-во уровней от 1 до 10 000: ", 1, 10000);
-        
+
         if (!val.has_value()) continue;
 
         cnf.cntLevels = *val;
@@ -105,6 +105,60 @@ void collectOpinionModelSettings(ManualGenConfig& cnf){
     }
 }
 
+GenerationMode chooseGenerationMode(){
+    while (true) {
+        auto val = od::io::readIntInRange(
+            "Выберите способ генерации:\n"
+            "1 - Ручная (свои параметры для каждого уровня)\n"
+            "2 - Общая (одни параметры на все уровни)\n"
+            "Ввод: ", 1, 2);
+        if (!val.has_value()) continue;
+        return (*val == 1) ? GenerationMode::Manual : GenerationMode::General;
+    }
+}
+
+ManualGenConfig collectGeneralGenConfig(){
+    ManualGenConfig cnf;
+
+    while (true) {
+        auto val = od::io::readIntInRange("Введите кол-во уровней от 1 до 10 000: ", 1, 10000);
+        if (!val.has_value()) continue;
+        cnf.cntLevels = *val;
+        break;
+    }
+
+    int maxPerLevel = MAX_VERTICAL / cnf.cntLevels;
+    int verticesPerLevel = 0;
+    while (true) {
+        auto val = od::io::readIntInRange(
+            "Введите кол-во вершин на каждый уровень (1.." + std::to_string(maxPerLevel) + "): ",
+            1, maxPerLevel);
+        if (!val.has_value()) continue;
+        verticesPerLevel = *val;
+        break;
+    }
+
+    double probability = 0.0;
+    while (true) {
+        auto val = od::io::readDoubleInRange("Введите вероятность появления ребра (0.0..1.0): ", 0.0, 1.0);
+        if (!val.has_value()) continue;
+        probability = *val;
+        break;
+    }
+
+    cnf.components.clear();
+    cnf.components.reserve(static_cast<size_t>(cnf.cntLevels));
+    for (int i = 0; i < cnf.cntLevels; ++i) {
+        cnf.components.push_back(LevelConfig{verticesPerLevel, probability});
+    }
+
+    collectStubbornSettings(cnf);
+    collectDynamicEdgesSettings(cnf);
+    collectOpinionModelSettings(cnf);
+
+    return cnf;
+}
+
 ManualGenConfig collectManualGenConfig(){
     ManualGenConfig cnf;
     collectLevels(cnf);
@@ -134,7 +188,7 @@ ValidationResult validateConfig(const ManualGenConfig& config){
         totalVertices += level.numVertices;
     }
 
-    if (totalVertices > 10000){
+    if (totalVertices > MAX_VERTICAL){
         return {false, "Суммарное количество вершин превышает 10000"};
     }
 
@@ -163,4 +217,4 @@ ValidationResult validateConfig(const ManualGenConfig& config){
     return {true, ""};
 }
 
-}
+} // namespace od::config

@@ -21,16 +21,27 @@ struct ManualGenConfig {
     double k1;
     double k2;
 };
+
 struct ValidationResult {
     bool isValid;
     std::string errorMessage;
 };
 
-void collectLevels(ManualGenConfig& cnf);   
+enum class GenerationMode {
+    Manual,
+    General
+};
+
+GenerationMode chooseGenerationMode();
+
+void collectLevels(ManualGenConfig& cnf);
 void collectStubbornSettings(ManualGenConfig& cnf);
 void collectDynamicEdgesSettings(ManualGenConfig& cnf);
 void collectOpinionModelSettings(ManualGenConfig& cnf);
 
 ManualGenConfig collectManualGenConfig();
+ManualGenConfig collectGeneralGenConfig();
+
 ValidationResult validateConfig(const ManualGenConfig& config);
-} 
+
+} // namespace od::config
