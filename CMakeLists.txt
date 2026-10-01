@@ -15,4 +15,5 @@ add_executable(opinion_dynamics
     src/graph/GraphGenerator.cpp
     src/model/DynamicsModel.cpp
     src/model/EdgeEvolution.cpp
+    src/io/SimulationLog.cpp
 )

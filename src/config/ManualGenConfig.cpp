@@ -107,21 +107,52 @@ void collectStubbornSettings(ManualGenConfig& cnf){
 }
 
 void collectDynamicEdgesSettings(ManualGenConfig& cnf){
-    cnf.dynamicEdges = od::io::readYesNo("Нужна ли динамика рёбер (изменение вероятности связи со временем)? Введите y/n: ");
+    cnf.dynamicEdges = od::io::readYesNo(
+        "Нужна ли динамика рёбер (изменение вероятности связи со временем)? Введите y/n: ");
+
     if (cnf.dynamicEdges){
         while (true) {
-            auto val = od::io::readDoubleInRange("Введите начальную вероятность от 0.0 до 1.0: ", 0.0, 1.0);
+            auto val = od::io::readDoubleInRange(
+                "Введите начальную вероятность добавления ребра (0.0..1.0): ", 0.0, 1.0);
             if (!val.has_value()) continue;
             cnf.p0 = *val;
             break;
         }
         while (true) {
-            auto val = od::io::readDoubleInRange("Введите коэффициент изменения от -5.0 до 5.0: ", -5.0, 5.0);
+            auto val = od::io::readDoubleInRange(
+                "Введите коэффициент изменения для добавления (-5.0..5.0): ", -5.0, 5.0);
             if (!val.has_value()) continue;
             cnf.k = *val;
             break;
         }
-    }else {cnf.p0 = 0.0; cnf.k = 0;}
+
+        cnf.removeEdges = od::io::readYesNo("Нужно ли удаление рёбер? Введите y/n: ");
+        if (cnf.removeEdges) {
+            while (true) {
+                auto val = od::io::readDoubleInRange(
+                    "Введите начальную вероятность удаления ребра (0.0..1.0): ", 0.0, 1.0);
+                if (!val.has_value()) continue;
+                cnf.removeP0 = *val;
+                break;
+            }
+            while (true) {
+                auto val = od::io::readDoubleInRange(
+                    "Введите коэффициент изменения для удаления (-5.0..5.0): ", -5.0, 5.0);
+                if (!val.has_value()) continue;
+                cnf.removeK = *val;
+                break;
+            }
+        } else {
+            cnf.removeP0 = 0.0;
+            cnf.removeK = 0.0;
+        }
+    } else {
+        cnf.p0 = 0.0;
+        cnf.k = 0.0;
+        cnf.removeEdges = false;
+        cnf.removeP0 = 0.0;
+        cnf.removeK = 0.0;
+    }
 }
 
 void collectOpinionModelSettings(ManualGenConfig& cnf){
@@ -247,10 +278,18 @@ ValidationResult validateConfig(const ManualGenConfig& config){
 
     if (config.dynamicEdges){
         if (config.p0 < 0.0 || config.p0 > 1.0){
-            return {false, "Начальная вероятность p0 должна быть в диапазоне [0.0, 1.0]"};
+            return {false, "Начальная вероятность добавления p0 должна быть в диапазоне [0.0, 1.0]"};
         }
         if (config.k < -5.0 || config.k > 5.0){
-            return {false, "Коэффициент k должен быть в диапазоне [-5.0, 5.0]"};
+            return {false, "Коэффициент добавления k должен быть в диапазоне [-5.0, 5.0]"};
+        }
+        if (config.removeEdges){
+            if (config.removeP0 < 0.0 || config.removeP0 > 1.0){
+                return {false, "Начальная вероятность удаления removeP0 должна быть в диапазоне [0.0, 1.0]"};
+            }
+            if (config.removeK < -5.0 || config.removeK > 5.0){
+                return {false, "Коэффициент удаления removeK должен быть в диапазоне [-5.0, 5.0]"};
+            }
         }
     }
 

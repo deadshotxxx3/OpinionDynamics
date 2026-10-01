@@ -131,4 +131,91 @@ od::graph::Graph loadGraph(const std::string& filename) {
     return graph;
 }
 
+void saveGraphWithParams(
+    const od::graph::Graph& graph,
+    const SimulationParams& params,
+    const std::string& filename
+) {
+    saveGraph(graph, filename);
+
+    std::ofstream file(filename, std::ios::app);
+    if (!file.is_open()) {
+        throw std::runtime_error("saveGraphWithParams: не удалось открыть файл для дозаписи: " + filename);
+    }
+
+    file << "\n";
+    file << "PARAMS\n";
+    file << "SEED " << params.seed << "\n";
+    file << "T_MAX " << params.tMax << "\n";
+    file << "K1 " << params.k1 << "\n";
+    file << "K2 " << params.k2 << "\n";
+    file << "DYNAMIC_EDGES " << (params.dynamicEdges ? 1 : 0) << "\n";
+    file << "P0 " << params.p0 << "\n";
+    file << "K " << params.k << "\n";
+    file << "REMOVE_EDGES " << (params.removeEdges ? 1 : 0) << "\n";
+    file << "REMOVE_P0 " << params.removeP0 << "\n";
+    file << "REMOVE_K " << params.removeK << "\n";
+
+    if (!file.good()) {
+        throw std::runtime_error("saveGraphWithParams: ошибка при записи PARAMS в " + filename);
+    }
+}
+
+od::graph::Graph loadGraphWithParams(
+    const std::string& filename,
+    SimulationParams& params,
+    bool& paramsLoaded
+) {
+    paramsLoaded = false;
+
+    od::graph::Graph graph = loadGraph(filename);
+
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("loadGraphWithParams: не удалось открыть файл: " + filename);
+    }
+
+    std::string token;
+    while (file >> token) {
+        if (token == "PARAMS") {
+            paramsLoaded = true;
+            break;
+        }
+    }
+
+    if (!paramsLoaded) {
+        return graph;
+    }
+
+    while (file >> token) {
+        if (token == "SEED") {
+            file >> params.seed;
+        } else if (token == "T_MAX") {
+            file >> params.tMax;
+        } else if (token == "K1") {
+            file >> params.k1;
+        } else if (token == "K2") {
+            file >> params.k2;
+        } else if (token == "DYNAMIC_EDGES") {
+            int v = 0;
+            file >> v;
+            params.dynamicEdges = (v != 0);
+        } else if (token == "P0") {
+            file >> params.p0;
+        } else if (token == "K") {
+            file >> params.k;
+        } else if (token == "REMOVE_EDGES") {
+            int v = 0;
+            file >> v;
+            params.removeEdges = (v != 0);
+        } else if (token == "REMOVE_P0") {
+            file >> params.removeP0;
+        } else if (token == "REMOVE_K") {
+            file >> params.removeK;
+        }
+    }
+
+    return graph;
+}
+
 } // namespace od::io

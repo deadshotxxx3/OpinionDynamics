@@ -10,17 +10,35 @@ double linearProbability(double p0, double k, int t) {
     return p;
 }
 
-void evolveEdges(Graph& graph, double currentP, std::mt19937& rng) {
+void evolveEdges(
+    Graph& graph,
+    double addProbability,
+    double removeProbability,
+    std::mt19937& rng,
+    int step,
+    std::vector<EdgeEvent>& events
+) {
     int n = graph.getNumVertices();
     std::uniform_real_distribution<double> dist(0.0, 1.0);
 
     for (int u = 0; u < n; ++u) {
         for (int v = u + 1; v < n; ++v) {
-            if (graph.hasEdge(u, v)) {
-                continue;
-            }
-            if (dist(rng) < currentP) {
-                graph.addEdge(u, v, dist(rng));
+            bool exists = graph.hasEdge(u, v);
+
+            if (!exists && addProbability > 0.0) {
+                if (dist(rng) < addProbability) {
+                    double weight = dist(rng);
+                    graph.addEdge(u, v, weight);
+                    events.push_back(EdgeEvent{step, true, u, v, weight});
+                }
+            } else if (exists && removeProbability > 0.0) {
+                if (dist(rng) < removeProbability) {
+                    const auto& neighbors = graph.getNeighbors(u);
+                    auto it = neighbors.find(v);
+                    double oldWeight = (it != neighbors.end()) ? it->second : 0.0;
+                    graph.removeEdge(u, v);
+                    events.push_back(EdgeEvent{step, false, u, v, oldWeight});
+                }
             }
         }
     }

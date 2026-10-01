@@ -17,9 +17,15 @@ struct ManualGenConfig {
     int numStubbornVertices;
     bool stubbornManualAttach;
     std::vector<int> stubbornTargets;
+
     bool dynamicEdges;
     double p0;
     double k;
+
+    bool removeEdges;
+    double removeP0;
+    double removeK;
+
     double k1;
     double k2;
 };

@@ -11,6 +11,7 @@ public:
     explicit Graph(int numVertices);
 
     void addEdge(int from, int to, double weight);
+    void removeEdge(int from, int to);
     int addVertex();
     bool hasEdge(int from, int to) const;
 

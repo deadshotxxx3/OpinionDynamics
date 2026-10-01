@@ -25,6 +25,17 @@ void Graph::addEdge(int from, int to, double weight) {
     }
 }
 
+void Graph::removeEdge(int from, int to) {
+    checkVertex(from);
+    checkVertex(to);
+
+    adjacency_[static_cast<size_t>(from)].erase(to);
+
+    if (from != to) {
+        adjacency_[static_cast<size_t>(to)].erase(from);
+    }
+}
+
 bool Graph::hasEdge(int from, int to) const {
     checkVertex(from);
     checkVertex(to);
