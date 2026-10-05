@@ -4,21 +4,21 @@
 #include <iostream>
 #include <string>
 
-const int MAX_VERTICAL = 10000;
+const int MAX_VERTICES = 10000;
 const int MAX_MANUAL_ATTACH = 100;
 
 namespace od::config {
 
 static void collectLevelDetails(ManualGenConfig& cnf){
     int cnt_io_comp = 0;
-    int correct_vertex = MAX_VERTICAL;
+    int correct_vertex = MAX_VERTICES;
 
     while (cnt_io_comp != cnf.cntLevels){
         int remainingComponents = cnf.cntLevels - cnt_io_comp;
         if (correct_vertex  < remainingComponents){
             cnt_io_comp = 0;
             cnf.components.clear();
-            correct_vertex = MAX_VERTICAL;
+            correct_vertex = MAX_VERTICES;
             std::cout << "Не удалось распределить вершины, начинаем ввод компонент заново\n";
             continue;
         }
@@ -195,7 +195,7 @@ ManualGenConfig collectGeneralGenConfig(){
         break;
     }
 
-    int maxPerLevel = MAX_VERTICAL / cnf.cntLevels;
+    int maxPerLevel = MAX_VERTICES / cnf.cntLevels;
     int verticesPerLevel = 0;
     while (true) {
         auto val = od::io::readIntInRange(
@@ -256,7 +256,7 @@ ValidationResult validateConfig(const ManualGenConfig& config){
         totalVertices += level.numVertices;
     }
 
-    if (totalVertices > MAX_VERTICAL){
+    if (totalVertices > MAX_VERTICES){
         return {false, "Суммарное количество вершин превышает 10000"};
     }
 
