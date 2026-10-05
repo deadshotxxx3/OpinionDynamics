@@ -7,6 +7,7 @@
 #include "od/model/EdgeEvolution.hpp"
 
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <random>
 #include <string>
@@ -63,7 +64,30 @@ struct RuntimeParams {
     double removeK = 0.0;
     unsigned int seed = 0;
     bool seedSpecified = false;
+    int tMax = 500;
 };
+
+void collectSeedSettings(RuntimeParams& rp) {
+    bool useCustomSeed = od::io::readYesNo("Задать seed вручную? (y - задать, n - случайный): ");
+    if (useCustomSeed) {
+        while (true) {
+            auto val = od::io::readIntInRange("Введите seed (0..2147483647): ", 0, 2147483647);
+            if (!val.has_value()) continue;
+            rp.seed = static_cast<unsigned int>(*val);
+            rp.seedSpecified = true;
+            break;
+        }
+    }
+}
+
+void collectTMaxSettings(RuntimeParams& rp) {
+    while (true) {
+        auto val = od::io::readIntInRange("Введите количество шагов симуляции (1..100000): ", 1, 100000);
+        if (!val.has_value()) continue;
+        rp.tMax = *val;
+        break;
+    }
+}
 
 RuntimeParams collectRuntimeParamsStandalone() {
     RuntimeParams rp;
@@ -120,16 +144,8 @@ RuntimeParams collectRuntimeParamsStandalone() {
         rp.removeEdges = false; rp.removeP0 = 0.0; rp.removeK = 0.0;
     }
 
-    bool useCustomSeed = od::io::readYesNo("Задать seed вручную? (y - задать, n - случайный): ");
-    if (useCustomSeed) {
-        while (true) {
-            auto val = od::io::readIntInRange("Введите seed (0..2147483647): ", 0, 2147483647);
-            if (!val.has_value()) continue;
-            rp.seed = static_cast<unsigned int>(*val);
-            rp.seedSpecified = true;
-            break;
-        }
-    }
+    collectTMaxSettings(rp);
+    collectSeedSettings(rp);
 
     return rp;
 }
@@ -172,16 +188,8 @@ std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParams() {
         rp.removeP0 = cnf.removeP0;
         rp.removeK = cnf.removeK;
 
-        bool useCustomSeed = od::io::readYesNo("Задать seed вручную? (y - задать, n - случайный): ");
-        if (useCustomSeed) {
-            while (true) {
-                auto val = od::io::readIntInRange("Введите seed (0..2147483647): ", 0, 2147483647);
-                if (!val.has_value()) continue;
-                rp.seed = static_cast<unsigned int>(*val);
-                rp.seedSpecified = true;
-                break;
-            }
-        }
+        collectTMaxSettings(rp);
+        collectSeedSettings(rp);
 
         return {std::move(graph), rp};
     } else {
@@ -225,6 +233,7 @@ std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParams() {
                     rp.removeEdges = fileParams.removeEdges;
                     rp.removeP0 = fileParams.removeP0;
                     rp.removeK = fileParams.removeK;
+                    rp.tMax = fileParams.tMax;
                     rp.seed = fileParams.seed;
                     rp.seedSpecified = true;
                 } else {
@@ -249,18 +258,20 @@ int main() {
     GraphStats stats = computeStats(graph);
     printStats("Статистика графа", stats);
 
-    const std::string initialGraphFile = "graph_initial.txt";
-    const std::string finalGraphFile   = "graph_final.txt";
-    const std::string logFile          = "simulation_log.txt";
-
     unsigned int seed = rp.seedSpecified ? rp.seed : std::random_device{}();
-    std::mt19937 rng(seed);
 
-    const int T_MAX = 500;
+    std::string runDir = "runs/run_" + std::to_string(seed);
+    std::filesystem::create_directories(runDir);
+
+    const std::string initialGraphFile = runDir + "/graph_initial.txt";
+    const std::string finalGraphFile   = runDir + "/graph_final.txt";
+    const std::string logFile          = runDir + "/simulation_log.txt";
+
+    std::mt19937 rng(seed);
 
     od::io::SimulationParams paramsForFile;
     paramsForFile.seed = seed;
-    paramsForFile.tMax = T_MAX;
+    paramsForFile.tMax = rp.tMax;
     paramsForFile.k1 = rp.k1;
     paramsForFile.k2 = rp.k2;
     paramsForFile.dynamicEdges = rp.dynamicEdges;
@@ -283,7 +294,8 @@ int main() {
     std::cout << "\n=== Параметры симуляции ===\n";
     std::cout << "Seed: " << seed
               << (rp.seedSpecified ? " (задан пользователем)" : " (сгенерирован)") << "\n";
-    std::cout << "T_MAX = " << T_MAX << "\n";
+    std::cout << "Папка прогона: " << runDir << "\n";
+    std::cout << "T_MAX = " << rp.tMax << "\n";
     std::cout << "k1 = " << rp.k1 << ", k2 = " << rp.k2 << "\n";
     if (rp.dynamicEdges) {
         std::cout << "dynamicEdges: p0 = " << rp.p0 << ", k = " << rp.k << "\n";
@@ -304,7 +316,7 @@ int main() {
 
     od::io::SimulationLog log;
     log.seed = seed;
-    log.tMax = T_MAX;
+    log.tMax = rp.tMax;
     log.k1 = rp.k1;
     log.k2 = rp.k2;
     log.dynamicEdges = rp.dynamicEdges;
@@ -315,11 +327,11 @@ int main() {
     log.removeK = rp.removeK;
     log.initialGraphFile = initialGraphFile;
     log.finalGraphFile = finalGraphFile;
-    log.history.reserve(static_cast<size_t>(T_MAX));
+    log.history.reserve(static_cast<size_t>(rp.tMax));
 
     std::cout << "=== Симуляция ===\n";
 
-    for (int t = 0; t < T_MAX; ++t) {
+    for (int t = 0; t < rp.tMax; ++t) {
         int stepNumber = t + 1;
 
         if (rp.dynamicEdges) {
@@ -345,7 +357,7 @@ int main() {
         long long edgesNow = countEdges(graph);
         log.history.push_back(od::io::StepRecord{ones, edgesNow});
 
-        bool printThisStep = (t < 100) || (t % 50 == 0) || (t == T_MAX - 1);
+        bool printThisStep = (t < 100) || (t % 50 == 0) || (t == rp.tMax - 1);
         if (printThisStep) {
             std::cout << "Шаг " << stepNumber
                       << ": мнение 1 у " << ones
@@ -358,7 +370,7 @@ int main() {
     for (int v : opinions) if (v == 1) ++countOnes;
 
     std::cout << "\n=== Итог ===\n";
-    std::cout << "После " << T_MAX << " шагов: мнение 1 у " << countOnes
+    std::cout << "После " << rp.tMax << " шагов: мнение 1 у " << countOnes
               << " из " << graph.getNumVertices() << " вершин\n";
     std::cout << "Всего рёбер в графе: " << countEdges(graph) << "\n";
     std::cout << "Всего изменений мнений: " << log.opinionChanges.size() << "\n";
