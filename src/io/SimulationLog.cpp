@@ -21,6 +21,7 @@ void saveSimulationLog(const SimulationLog& log, const std::string& filename) {
     file << "REMOVE_EDGES " << (log.removeEdges ? 1 : 0) << "\n";
     file << "REMOVE_P0 " << log.removeP0 << "\n";
     file << "REMOVE_K " << log.removeK << "\n";
+    file << "USE_WEIGHTS " << (log.useWeights ? 1 : 0) << "\n";
     file << "\n";
 
     file << "INITIAL_GRAPH_FILE " << log.initialGraphFile << "\n";

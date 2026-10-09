@@ -28,6 +28,8 @@ struct ManualGenConfig {
 
     double k1;
     double k2;
+
+    bool useWeights = false;
 };
 
 struct ValidationResult {

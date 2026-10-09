@@ -30,6 +30,7 @@ struct SimulationLog {
     bool removeEdges = false;
     double removeP0 = 0.0;
     double removeK = 0.0;
+    bool useWeights = false;
 
     std::string initialGraphFile;
     std::string finalGraphFile;

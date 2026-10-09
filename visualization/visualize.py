@@ -33,6 +33,11 @@ class TokenReader:
         token = self.next()
         if token != expected:
             raise ValueError(f"Ожидался токен '{expected}', получен '{token}'")
+    
+    def peek(self):
+        if self._pos >= len(self._tokens):
+            return None
+        return self._tokens[self._pos]
 
 
 def parse_graph(filepath):
@@ -78,6 +83,10 @@ def parse_log_params(reader):
     remove_p0 = reader.next_float()
     reader.expect("REMOVE_K")
     remove_k = reader.next_float()
+    use_weights = 0
+    if reader.peek() == "USE_WEIGHTS":
+        reader.next()
+        use_weights = reader.next_int()
 
     return {
         "seed": seed,
@@ -90,6 +99,7 @@ def parse_log_params(reader):
         "remove_edges": remove_edges,
         "remove_p0": remove_p0,
         "remove_k": remove_k,
+        "use_weights": use_weights,
     }
 
 

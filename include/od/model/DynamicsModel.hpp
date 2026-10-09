@@ -16,6 +16,7 @@ std::vector<int> stepOpinions(
     const std::vector<int>& currentOpinions,
     double k1,
     double k2,
+    bool useWeights,
     std::mt19937& rng
 );
 

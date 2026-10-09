@@ -31,6 +31,8 @@ class SimulationForm:
         self.visualize_var = tk.BooleanVar(value=True)
         self.source_var = tk.StringVar(value="generate")
         self.load_graph_var = tk.StringVar(value="initial")
+        self.use_weights_var = tk.BooleanVar(value=False)
+        self.load_weights_var = tk.StringVar(value="file")
 
         self.generate_frame = None
         self.load_frame = None
@@ -156,6 +158,9 @@ class SimulationForm:
         self.add_entry(basics, "gen_k2", "Порог k2", "0.5")
         self.add_entry(basics, "gen_tmax", "Количество шагов", "500")
         self.add_entry(basics, "gen_seed", "Seed (пусто = случайный)", "")
+        ttk.Checkbutton(
+            basics, text="Учитывать веса рёбер", variable=self.use_weights_var
+        ).pack(anchor="w", padx=6, pady=2)
 
         stubborn_frame = ttk.LabelFrame(outer, text="Упрямые вершины")
         stubborn_frame.pack(fill="x", padx=10, pady=6)
@@ -221,6 +226,19 @@ class SimulationForm:
         self.add_entry(override_frame, "load_k2", "Порог k2", "")
         self.add_entry(override_frame, "load_tmax", "Количество шагов", "")
         self.add_entry(override_frame, "load_seed", "Seed", "")
+
+        weights_row = ttk.Frame(override_frame)
+        weights_row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(weights_row, text="Веса рёбер", width=28).pack(side="left")
+        ttk.Radiobutton(
+            weights_row, text="Из файла", variable=self.load_weights_var, value="file"
+        ).pack(side="left")
+        ttk.Radiobutton(
+            weights_row, text="Учитывать", variable=self.load_weights_var, value="on"
+        ).pack(side="left")
+        ttk.Radiobutton(
+            weights_row, text="Не учитывать", variable=self.load_weights_var, value="off"
+        ).pack(side="left")
 
         self.load_frame = outer
 
@@ -539,6 +557,10 @@ class SimulationForm:
             raise ValueError("Заполните k1, k2 и количество шагов")
 
         args += ["--k1", k1, "--k2", k2, "--tmax", tmax]
+
+        if self.use_weights_var.get():
+            args.append("--use-weights")
+
         return args
 
     def build_load_args(self):
@@ -571,6 +593,12 @@ class SimulationForm:
             args += ["--k2", k2]
         if tmax:
             args += ["--tmax", tmax]
+        
+        weights_mode = self.load_weights_var.get()
+        if weights_mode == "on":
+            args.append("--use-weights")
+        elif weights_mode == "off":
+            args.append("--no-weights")
 
         return args
 

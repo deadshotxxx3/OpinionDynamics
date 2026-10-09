@@ -25,11 +25,43 @@ double opinionChangeProbability(double x, double k1, double k2) {
     }
 }
 
+static bool computeShare(
+    const Graph& graph,
+    int vertex,
+    const std::vector<int>& opinions,
+    bool useWeights,
+    double& share
+) {
+    const auto& neighbors = graph.getNeighbors(vertex);
+    if (neighbors.empty()) {
+        return false;
+    }
+
+    double positive = 0.0;
+    double total = 0.0;
+
+    for (const auto& [neighborId, weight] : neighbors) {
+        double contribution = useWeights ? weight : 1.0;
+        total += contribution;
+        if (opinions[neighborId] == 1) {
+            positive += contribution;
+        }
+    }
+
+    if (total <= 0.0) {
+        return false;
+    }
+
+    share = positive / total;
+    return true;
+}
+
 std::vector<int> stepOpinions(
     const Graph& graph,
     const std::vector<int>& currentOpinions,
     double k1,
     double k2,
+    bool useWeights,
     std::mt19937& rng
 ) {
     std::vector<int> newOpinions = currentOpinions;
@@ -42,27 +74,13 @@ std::vector<int> stepOpinions(
             continue;
         }
 
-        const auto& neighbors = graph.getNeighbors(j);
-
-        if (neighbors.empty()) {
+        double x = 0.0;
+        if (!computeShare(graph, j, currentOpinions, useWeights, x)) {
             continue;
         }
 
-        int c_j = 0;
-        for (const auto& [neighborId, weight] : neighbors) {
-            c_j += currentOpinions[neighborId];
-        }
-
-        int d_j = static_cast<int>(neighbors.size());
-        double x = static_cast<double>(c_j) / d_j;
-
         double prob = opinionChangeProbability(x, k1, k2);
-
-        if (dist(rng) < prob) {
-            newOpinions[j] = 1;
-        } else {
-            newOpinions[j] = 0;
-        }
+        newOpinions[j] = (dist(rng) < prob) ? 1 : 0;
     }
 
     return newOpinions;

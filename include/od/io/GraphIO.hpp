@@ -16,6 +16,7 @@ struct SimulationParams {
     bool removeEdges = false;
     double removeP0 = 0.0;
     double removeK = 0.0;
+    bool useWeights = false;
 };
 
 void saveGraph(const od::graph::Graph& graph, const std::string& filename);

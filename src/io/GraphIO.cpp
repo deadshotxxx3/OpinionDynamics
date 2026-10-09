@@ -155,6 +155,7 @@ void saveGraphWithParams(
     file << "REMOVE_EDGES " << (params.removeEdges ? 1 : 0) << "\n";
     file << "REMOVE_P0 " << params.removeP0 << "\n";
     file << "REMOVE_K " << params.removeK << "\n";
+    file << "USE_WEIGHTS " << (params.useWeights ? 1 : 0) << "\n";
 
     if (!file.good()) {
         throw std::runtime_error("saveGraphWithParams: ошибка при записи PARAMS в " + filename);
@@ -212,6 +213,10 @@ od::graph::Graph loadGraphWithParams(
             file >> params.removeP0;
         } else if (token == "REMOVE_K") {
             file >> params.removeK;
+        } else if (token == "USE_WEIGHTS") {
+            int v = 0;
+            file >> v;
+            params.useWeights = (v != 0);
         }
     }
 

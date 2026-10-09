@@ -171,6 +171,9 @@ void collectOpinionModelSettings(ManualGenConfig& cnf){
         cnf.k2 = *val;
         break;
     }
+
+    cnf.useWeights = od::io::readYesNo(
+        "Учитывать веса рёбер при изменении мнения? Введите y/n: ");
 }
 
 GenerationMode chooseGenerationMode(){
