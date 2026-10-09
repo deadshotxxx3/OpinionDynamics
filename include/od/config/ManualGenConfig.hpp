@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace od::config {
 
@@ -10,25 +10,30 @@ struct LevelConfig {
     double probability;
 };
 
+struct StubbornGroup {
+    int count = 0;
+    bool manual = false;
+    std::vector<int> targets;
+};
+
 struct ManualGenConfig {
-    int cntLevels;
+    int cntLevels = 0;
     std::vector<LevelConfig> components;
-    bool generateStubborn;
-    int numStubbornVertices;
-    bool stubbornManualAttach;
-    std::vector<int> stubbornTargets;
 
-    bool dynamicEdges;
-    double p0;
-    double k;
+    bool generateStubborn = false;
+    StubbornGroup stubbornAssign;
+    StubbornGroup stubbornAttach;
 
-    bool removeEdges;
-    double removeP0;
-    double removeK;
+    bool dynamicEdges = false;
+    double p0 = 0.0;
+    double k = 0.0;
 
-    double k1;
-    double k2;
+    bool removeEdges = false;
+    double removeP0 = 0.0;
+    double removeK = 0.0;
 
+    double k1 = 0.0;
+    double k2 = 1.0;
     bool useWeights = false;
 };
 

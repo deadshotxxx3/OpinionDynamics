@@ -1,7 +1,8 @@
 #pragma once
 
-#include "od/graph/Graph.hpp"
 #include "od/config/ManualGenConfig.hpp"
+#include "od/graph/Graph.hpp"
+
 #include <random>
 #include <vector>
 
@@ -11,9 +12,8 @@ Graph generateManualGraph(const od::config::ManualGenConfig& config);
 
 void assignStubbornVertices(
     Graph& graph,
-    int numStubborn,
-    bool manualAttach,
-    const std::vector<int>& targets,
+    const od::config::StubbornGroup& assignGroup,
+    const od::config::StubbornGroup& attachGroup,
     std::mt19937& rng);
 
 } // namespace od::graph

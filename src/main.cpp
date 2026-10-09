@@ -97,16 +97,24 @@ void copyConfigParams(RuntimeParams& rp, const od::config::ManualGenConfig& cnf)
     rp.removeK = cnf.removeK;
 }
 
+double readDoubleLoop(const std::string& prompt, double minVal, double maxVal) {
+    while (true) {
+        auto val = od::io::readDoubleInRange(prompt, minVal, maxVal);
+        if (val.has_value()) return *val;
+    }
+}
+
 void collectSeedSettings(RuntimeParams& rp) {
     bool useCustomSeed = od::io::readYesNo("Задать seed вручную? (y - задать, n - случайный): ");
-    if (useCustomSeed) {
-        while (true) {
-            auto val = od::io::readIntInRange("Введите seed (0..2147483647): ", 0, 2147483647);
-            if (!val.has_value()) continue;
-            rp.seed = static_cast<unsigned int>(*val);
-            rp.seedSpecified = true;
-            break;
-        }
+    if (!useCustomSeed) {
+        return;
+    }
+    while (true) {
+        auto val = od::io::readIntInRange("Введите seed (0..2147483647): ", 0, 2147483647);
+        if (!val.has_value()) continue;
+        rp.seed = static_cast<unsigned int>(*val);
+        rp.seedSpecified = true;
+        break;
     }
 }
 
@@ -119,63 +127,36 @@ void collectTMaxSettings(RuntimeParams& rp) {
     }
 }
 
+void collectEdgeDynamicsStandalone(RuntimeParams& rp) {
+    rp.dynamicEdges = od::io::readYesNo("Нужна ли динамика рёбер? Введите y/n: ");
+    rp.p0 = 0.0;
+    rp.k = 0.0;
+    rp.removeEdges = false;
+    rp.removeP0 = 0.0;
+    rp.removeK = 0.0;
+
+    if (!rp.dynamicEdges) {
+        return;
+    }
+
+    rp.p0 = readDoubleLoop("Введите начальную вероятность добавления p0 (0.0..1.0): ", 0.0, 1.0);
+    rp.k = readDoubleLoop("Введите коэффициент добавления k (-5.0..5.0): ", -5.0, 5.0);
+
+    rp.removeEdges = od::io::readYesNo("Нужно ли удаление рёбер? Введите y/n: ");
+    if (rp.removeEdges) {
+        rp.removeP0 = readDoubleLoop("Введите начальную вероятность удаления removeP0 (0.0..1.0): ", 0.0, 1.0);
+        rp.removeK = readDoubleLoop("Введите коэффициент удаления removeK (-5.0..5.0): ", -5.0, 5.0);
+    }
+}
+
 RuntimeParams collectRuntimeParamsStandalone() {
     RuntimeParams rp;
 
-    while (true) {
-        auto val = od::io::readDoubleInRange("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
-        if (!val.has_value()) continue;
-        rp.k1 = *val;
-        break;
-    }
-    while (true) {
-        auto val = od::io::readDoubleInRange(
-            "Введите порог k2 (" + std::to_string(rp.k1) + "..1.0): ", rp.k1, 1.0);
-        if (!val.has_value()) continue;
-        rp.k2 = *val;
-        break;
-    }
-
+    rp.k1 = readDoubleLoop("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+    rp.k2 = readDoubleLoop("Введите порог k2 (" + std::to_string(rp.k1) + "..1.0): ", rp.k1, 1.0);
     rp.useWeights = od::io::readYesNo("Учитывать веса рёбер при изменении мнения? Введите y/n: ");
 
-    rp.dynamicEdges = od::io::readYesNo("Нужна ли динамика рёбер? Введите y/n: ");
-    if (rp.dynamicEdges) {
-        while (true) {
-            auto val = od::io::readDoubleInRange("Введите начальную вероятность добавления p0 (0.0..1.0): ", 0.0, 1.0);
-            if (!val.has_value()) continue;
-            rp.p0 = *val;
-            break;
-        }
-        while (true) {
-            auto val = od::io::readDoubleInRange("Введите коэффициент добавления k (-5.0..5.0): ", -5.0, 5.0);
-            if (!val.has_value()) continue;
-            rp.k = *val;
-            break;
-        }
-
-        rp.removeEdges = od::io::readYesNo("Нужно ли удаление рёбер? Введите y/n: ");
-        if (rp.removeEdges) {
-            while (true) {
-                auto val = od::io::readDoubleInRange("Введите начальную вероятность удаления removeP0 (0.0..1.0): ", 0.0, 1.0);
-                if (!val.has_value()) continue;
-                rp.removeP0 = *val;
-                break;
-            }
-            while (true) {
-                auto val = od::io::readDoubleInRange("Введите коэффициент удаления removeK (-5.0..5.0): ", -5.0, 5.0);
-                if (!val.has_value()) continue;
-                rp.removeK = *val;
-                break;
-            }
-        } else {
-            rp.removeP0 = 0.0;
-            rp.removeK = 0.0;
-        }
-    } else {
-        rp.p0 = 0.0; rp.k = 0.0;
-        rp.removeEdges = false; rp.removeP0 = 0.0; rp.removeK = 0.0;
-    }
-
+    collectEdgeDynamicsStandalone(rp);
     collectTMaxSettings(rp);
     collectSeedSettings(rp);
 
@@ -224,6 +205,13 @@ std::pair<od::graph::Graph, RuntimeParams> generateInteractive() {
     return {std::move(graph), rp};
 }
 
+int readChoice(const std::string& prompt, int minVal, int maxVal) {
+    while (true) {
+        auto val = od::io::readIntInRange(prompt, minVal, maxVal);
+        if (val.has_value()) return *val;
+    }
+}
+
 std::pair<od::graph::Graph, RuntimeParams> loadInteractive() {
     std::cout << "Введите путь к папке прогона (например, runs/run_42): ";
     std::string dirPath;
@@ -233,14 +221,7 @@ std::pair<od::graph::Graph, RuntimeParams> loadInteractive() {
     std::cout << "Какой граф загрузить?\n";
     std::cout << "1 - Начальный (graph_initial.txt)\n";
     std::cout << "2 - Конечный (graph_final.txt)\n";
-
-    int graphChoice;
-    while (true) {
-        auto val = od::io::readIntInRange("Ввод: ", 1, 2);
-        if (!val.has_value()) continue;
-        graphChoice = *val;
-        break;
-    }
+    int graphChoice = readChoice("Ввод: ", 1, 2);
 
     std::string filename = dirPath + "/" + (graphChoice == 1 ? "graph_initial.txt" : "graph_final.txt");
 
@@ -275,14 +256,7 @@ std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParamsInteractive() {
     std::cout << "Выберите способ получения графа:\n";
     std::cout << "1 - Сгенерировать новый граф\n";
     std::cout << "2 - Загрузить граф из папки прогона\n";
-
-    int choice;
-    while (true) {
-        auto val = od::io::readIntInRange("Ввод: ", 1, 2);
-        if (!val.has_value()) continue;
-        choice = *val;
-        break;
-    }
+    int choice = readChoice("Ввод: ", 1, 2);
 
     return (choice == 1) ? generateInteractive() : loadInteractive();
 }
@@ -293,10 +267,13 @@ struct BatchArgs {
     std::vector<int> levelVertices;
     std::vector<double> levelProbabilities;
 
-    bool stubborn_set = false;
-    int stubborn = 0;
-    std::string stubbornMode = "random";
-    std::string stubbornTargets;
+    int attachCount = 0;
+    std::string attachMode = "random";
+    std::string attachTargets;
+
+    int assignCount = 0;
+    std::string assignMode = "random";
+    std::string assignTargets;
 
     std::string loadDir;
     std::string loadGraph = "initial";
@@ -340,7 +317,8 @@ void printBatchUsage() {
     std::cout << "  --k1 X --k2 Y [--tmax N] [--seed N]\n\n";
     std::cout << "Опции:\n";
     std::cout << "  --use-weights | --no-weights\n";
-    std::cout << "  --stubborn N [--stubborn-mode random|manual] [--stubborn-targets 0,2,4]\n";
+    std::cout << "  --stubborn-attach N [--stubborn-attach-mode random|manual] [--stubborn-attach-targets 0,2,4]\n";
+    std::cout << "  --stubborn-assign N [--stubborn-assign-mode random|manual] [--stubborn-assign-targets 1,3,5]\n";
     std::cout << "  --dynamic-edges --p0 X --k Y\n";
     std::cout << "  --remove-edges --remove-p0 X --remove-k Y\n";
 }
@@ -372,6 +350,14 @@ double parseDoubleArg(const std::string& value, const std::string& flag) {
         std::exit(1);
     }
     return 0.0;
+}
+
+std::string parseModeArg(const std::string& value, const std::string& flag) {
+    if (value != "random" && value != "manual") {
+        std::cout << "Ошибка: " << flag << " должен быть 'random' или 'manual'\n";
+        std::exit(1);
+    }
+    return value;
 }
 
 std::vector<int> parseIntList(const std::string& csv, const std::string& flag) {
@@ -425,6 +411,75 @@ void validateBatchLevels(BatchArgs& args, bool vertices_set, int single_vertices
     }
 }
 
+bool parseStubbornFlag(const std::string& flag, int argc, char** argv, int& i, BatchArgs& args) {
+    if (flag == "--stubborn" || flag == "--stubborn-attach") {
+        args.attachCount = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
+    } else if (flag == "--stubborn-mode" || flag == "--stubborn-attach-mode") {
+        args.attachMode = parseModeArg(nextArgValue(argc, argv, i, flag), flag);
+    } else if (flag == "--stubborn-targets" || flag == "--stubborn-attach-targets") {
+        args.attachTargets = nextArgValue(argc, argv, i, flag);
+    } else if (flag == "--stubborn-assign") {
+        args.assignCount = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
+    } else if (flag == "--stubborn-assign-mode") {
+        args.assignMode = parseModeArg(nextArgValue(argc, argv, i, flag), flag);
+    } else if (flag == "--stubborn-assign-targets") {
+        args.assignTargets = nextArgValue(argc, argv, i, flag);
+    } else {
+        return false;
+    }
+    return true;
+}
+
+bool parseEdgeDynamicsFlag(const std::string& flag, int argc, char** argv, int& i, BatchArgs& args) {
+    if (flag == "--dynamic-edges") {
+        args.dynamicEdges = true;
+        args.dynamicEdges_set = true;
+    } else if (flag == "--p0") {
+        args.p0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.p0_set = true;
+    } else if (flag == "--k") {
+        args.k = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.k_add_set = true;
+    } else if (flag == "--remove-edges") {
+        args.removeEdges = true;
+        args.removeEdges_set = true;
+    } else if (flag == "--remove-p0") {
+        args.removeP0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.removeP0_set = true;
+    } else if (flag == "--remove-k") {
+        args.removeK = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.removeK_set = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
+bool parseSimulationFlag(const std::string& flag, int argc, char** argv, int& i, BatchArgs& args) {
+    if (flag == "--k1") {
+        args.k1 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.k1_set = true;
+    } else if (flag == "--k2") {
+        args.k2 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.k2_set = true;
+    } else if (flag == "--tmax") {
+        args.tMax = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
+        args.tMax_set = true;
+    } else if (flag == "--seed") {
+        args.seed = static_cast<unsigned int>(parseIntArg(nextArgValue(argc, argv, i, flag), flag));
+        args.seed_set = true;
+    } else if (flag == "--use-weights") {
+        args.useWeights = true;
+        args.useWeights_set = true;
+    } else if (flag == "--no-weights") {
+        args.useWeights = false;
+        args.useWeights_set = true;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 BatchArgs parseBatchArgs(int argc, char** argv) {
     BatchArgs args;
     bool vertices_set = false;
@@ -456,49 +511,12 @@ BatchArgs parseBatchArgs(int argc, char** argv) {
                 std::cout << "Ошибка: --load-graph должен быть 'initial' или 'final'\n";
                 std::exit(1);
             }
-        } else if (flag == "--stubborn") {
-            args.stubborn = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
-            args.stubborn_set = true;
-        } else if (flag == "--stubborn-mode") {
-            args.stubbornMode = nextArgValue(argc, argv, i, flag);
-        } else if (flag == "--stubborn-targets") {
-            args.stubbornTargets = nextArgValue(argc, argv, i, flag);
-        } else if (flag == "--k1") {
-            args.k1 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-            args.k1_set = true;
-        } else if (flag == "--k2") {
-            args.k2 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-            args.k2_set = true;
-        } else if (flag == "--tmax") {
-            args.tMax = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
-            args.tMax_set = true;
-        } else if (flag == "--seed") {
-            args.seed = static_cast<unsigned int>(parseIntArg(nextArgValue(argc, argv, i, flag), flag));
-            args.seed_set = true;
-        } else if (flag == "--use-weights") {
-            args.useWeights = true;
-            args.useWeights_set = true;
-        } else if (flag == "--no-weights") {
-            args.useWeights = false;
-            args.useWeights_set = true;
-        } else if (flag == "--dynamic-edges") {
-            args.dynamicEdges = true;
-            args.dynamicEdges_set = true;
-        } else if (flag == "--p0") {
-            args.p0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-            args.p0_set = true;
-        } else if (flag == "--k") {
-            args.k = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-            args.k_add_set = true;
-        } else if (flag == "--remove-edges") {
-            args.removeEdges = true;
-            args.removeEdges_set = true;
-        } else if (flag == "--remove-p0") {
-            args.removeP0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-            args.removeP0_set = true;
-        } else if (flag == "--remove-k") {
-            args.removeK = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-            args.removeK_set = true;
+        } else if (parseStubbornFlag(flag, argc, argv, i, args)) {
+            continue;
+        } else if (parseEdgeDynamicsFlag(flag, argc, argv, i, args)) {
+            continue;
+        } else if (parseSimulationFlag(flag, argc, argv, i, args)) {
+            continue;
         } else {
             std::cout << "Неизвестный флаг: " << flag << "\n";
             printBatchUsage();
@@ -513,22 +531,35 @@ BatchArgs parseBatchArgs(int argc, char** argv) {
     return args;
 }
 
+od::config::StubbornGroup buildStubbornGroup(int count, const std::string& mode,
+                                             const std::string& targets, const std::string& flag) {
+    od::config::StubbornGroup group;
+    group.count = count;
+    group.manual = (mode == "manual");
+    if (group.manual && count > 0) {
+        if (targets.empty()) {
+            std::cout << "Ошибка: ручной режим, но не задан " << flag << "\n";
+            std::exit(1);
+        }
+        group.targets = parseIntList(targets, flag);
+    }
+    return group;
+}
+
 od::config::ManualGenConfig buildConfigFromBatchArgs(const BatchArgs& args) {
     od::config::ManualGenConfig cnf;
     cnf.cntLevels = static_cast<int>(args.levelVertices.size());
 
-    cnf.components.clear();
     for (size_t i = 0; i < args.levelVertices.size(); ++i) {
         cnf.components.push_back(
             od::config::LevelConfig{args.levelVertices[i], args.levelProbabilities[i]});
     }
 
-    cnf.generateStubborn = args.stubborn_set && args.stubborn > 0;
-    cnf.numStubbornVertices = args.stubborn;
-    cnf.stubbornManualAttach = (args.stubbornMode == "manual");
-    if (cnf.stubbornManualAttach && !args.stubbornTargets.empty()) {
-        cnf.stubbornTargets = parseIntList(args.stubbornTargets, "--stubborn-targets");
-    }
+    cnf.stubbornAssign = buildStubbornGroup(
+        args.assignCount, args.assignMode, args.assignTargets, "--stubborn-assign-targets");
+    cnf.stubbornAttach = buildStubbornGroup(
+        args.attachCount, args.attachMode, args.attachTargets, "--stubborn-attach-targets");
+    cnf.generateStubborn = cnf.stubbornAssign.count > 0 || cnf.stubbornAttach.count > 0;
 
     cnf.dynamicEdges = args.dynamicEdges;
     cnf.p0 = args.p0;
@@ -782,8 +813,7 @@ int main(int argc, char** argv) {
         BatchArgs args = parseBatchArgs(argc, argv);
         auto [graph, rp] = setupGraphAndParamsBatch(args);
         runSimulation(std::move(graph), rp);
-    } 
-    else {
+    } else {
         auto [graph, rp] = setupGraphAndParamsInteractive();
         runSimulation(std::move(graph), rp);
     }

@@ -1,54 +1,70 @@
 #include "od/graph/GraphGenerator.hpp"
 
 #include <algorithm>
+#include <numeric>
+#include <random>
 #include <stdexcept>
 #include <vector>
-#include <random>
 
 namespace od::graph {
 
-void assignStubbornVertices(
+namespace {
+
+void validateGroupTargets(const od::config::StubbornGroup& group, int originalCount) {
+    if (static_cast<int>(group.targets.size()) != group.count) {
+        throw std::invalid_argument("assignStubbornVertices: размер targets не совпадает с count");
+    }
+    for (int idx : group.targets) {
+        if (idx < 0 || idx >= originalCount) {
+            throw std::out_of_range("assignStubbornVertices: индекс цели вне диапазона");
+        }
+    }
+}
+
+void assignExistingStubborn(
     Graph& graph,
-    int numStubborn,
-    bool manualAttach,
-    const std::vector<int>& targets,
+    const od::config::StubbornGroup& group,
+    int originalCount,
     std::mt19937& rng
 ) {
-    int originalCount = graph.getNumVertices();
-    if (originalCount == 0) {
-        throw std::logic_error("Нельзя прикрепить упрямую вершину к пустому графу");
+    if (group.count > originalCount) {
+        throw std::invalid_argument("assignStubbornVertices: назначаемых упрямых больше, чем вершин");
     }
 
-    if (manualAttach) {
-        if (static_cast<int>(targets.size()) != numStubborn) {
-            throw std::invalid_argument("assignStubbornVertices: размер targets не совпадает с numStubborn");
+    if (group.manual) {
+        for (int idx : group.targets) {
+            graph.setStubborn(idx, true);
         }
-        for (int idx : targets) {
-            if (idx < 0 || idx >= originalCount) {
-                throw std::out_of_range("assignStubbornVertices: индекс цели вне диапазона");
-            }
-        }
+        return;
     }
 
+    std::vector<int> indices(static_cast<size_t>(originalCount));
+    std::iota(indices.begin(), indices.end(), 0);
+    std::shuffle(indices.begin(), indices.end(), rng);
+
+    for (int i = 0; i < group.count; ++i) {
+        graph.setStubborn(indices[static_cast<size_t>(i)], true);
+    }
+}
+
+void attachNewStubborn(
+    Graph& graph,
+    const od::config::StubbornGroup& group,
+    int originalCount,
+    std::mt19937& rng
+) {
     std::uniform_int_distribution<int> dist(0, originalCount - 1);
     std::uniform_real_distribution<double> weightDist(0.0, 1.0);
 
-    for (int i = 0; i < numStubborn; ++i) {
-        int neighbor = manualAttach ? targets[static_cast<size_t>(i)] : dist(rng);
+    for (int i = 0; i < group.count; ++i) {
+        int neighbor = group.manual ? group.targets[static_cast<size_t>(i)] : dist(rng);
         int v = graph.addVertex();
         graph.addEdge(v, neighbor, weightDist(rng));
         graph.setStubborn(v, true);
     }
 }
 
-Graph generateManualGraph(const od::config::ManualGenConfig& config) {
-    int totalVertices = 0;
-    for (const auto& level : config.components) {
-        totalVertices += level.numVertices;
-    }
-
-    Graph graph(totalVertices);
-
+std::vector<int> computeLevelOffsets(const od::config::ManualGenConfig& config) {
     std::vector<int> offsets;
     offsets.reserve(config.components.size());
     int currentOffset = 0;
@@ -56,8 +72,15 @@ Graph generateManualGraph(const od::config::ManualGenConfig& config) {
         offsets.push_back(currentOffset);
         currentOffset += level.numVertices;
     }
+    return offsets;
+}
 
-    std::mt19937 rng(std::random_device{}());
+void generateIntraLevelEdges(
+    Graph& graph,
+    const od::config::ManualGenConfig& config,
+    const std::vector<int>& offsets,
+    std::mt19937& rng
+) {
     std::uniform_real_distribution<double> dist(0.0, 1.0);
 
     for (size_t i = 0; i < config.components.size(); ++i) {
@@ -73,6 +96,15 @@ Graph generateManualGraph(const od::config::ManualGenConfig& config) {
             }
         }
     }
+}
+
+void generateInterLevelEdges(
+    Graph& graph,
+    const od::config::ManualGenConfig& config,
+    const std::vector<int>& offsets,
+    std::mt19937& rng
+) {
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
 
     for (size_t i = 0; i < config.components.size(); ++i) {
         for (size_t j = i + 1; j < config.components.size(); ++j) {
@@ -91,14 +123,52 @@ Graph generateManualGraph(const od::config::ManualGenConfig& config) {
             }
         }
     }
+}
+
+} // namespace
+
+void assignStubbornVertices(
+    Graph& graph,
+    const od::config::StubbornGroup& assignGroup,
+    const od::config::StubbornGroup& attachGroup,
+    std::mt19937& rng
+) {
+    int originalCount = graph.getNumVertices();
+    if (originalCount == 0) {
+        throw std::logic_error("Нельзя назначить упрямые вершины в пустом графе");
+    }
+
+    if (assignGroup.count > 0) {
+        if (assignGroup.manual) {
+            validateGroupTargets(assignGroup, originalCount);
+        }
+        assignExistingStubborn(graph, assignGroup, originalCount, rng);
+    }
+
+    if (attachGroup.count > 0) {
+        if (attachGroup.manual) {
+            validateGroupTargets(attachGroup, originalCount);
+        }
+        attachNewStubborn(graph, attachGroup, originalCount, rng);
+    }
+}
+
+Graph generateManualGraph(const od::config::ManualGenConfig& config) {
+    int totalVertices = 0;
+    for (const auto& level : config.components) {
+        totalVertices += level.numVertices;
+    }
+
+    Graph graph(totalVertices);
+    std::vector<int> offsets = computeLevelOffsets(config);
+
+    std::mt19937 rng(std::random_device{}());
+
+    generateIntraLevelEdges(graph, config, offsets, rng);
+    generateInterLevelEdges(graph, config, offsets, rng);
 
     if (config.generateStubborn) {
-        assignStubbornVertices(
-            graph,
-            config.numStubbornVertices,
-            config.stubbornManualAttach,
-            config.stubbornTargets,
-            rng);
+        assignStubbornVertices(graph, config.stubbornAssign, config.stubbornAttach, rng);
     }
 
     return graph;
