@@ -14,6 +14,7 @@ from visualize import (
 
 
 BINARY_PATH_DEFAULT = "../build/opinion_dynamics"
+LABEL_WIDTH = 28
 
 
 class SimulationForm:
@@ -25,9 +26,9 @@ class SimulationForm:
 
         self.fields = {}
         self.level_rows = []
+        self.stubborn_mode_vars = {}
         self.dynamic_edges_var = tk.BooleanVar()
         self.remove_edges_var = tk.BooleanVar()
-        self.stubborn_mode_var = tk.StringVar(value="random")
         self.visualize_var = tk.BooleanVar(value=True)
         self.source_var = tk.StringVar(value="generate")
         self.load_graph_var = tk.StringVar(value="initial")
@@ -128,10 +129,8 @@ class SimulationForm:
             command=self.on_source_changed,
         ).pack(anchor="w", padx=6, pady=1)
 
-    def build_generate_section(self):
-        outer = ttk.Frame(self.scrollable_parent)
-
-        levels_frame = ttk.LabelFrame(outer, text="Уровни")
+    def build_levels_frame(self, parent):
+        levels_frame = ttk.LabelFrame(parent, text="Уровни")
         levels_frame.pack(fill="x", padx=10, pady=6)
 
         header = ttk.Frame(levels_frame)
@@ -151,34 +150,51 @@ class SimulationForm:
 
         self.add_level_row(50, "0.3")
 
-        basics = ttk.LabelFrame(outer, text="Параметры мнений")
+    def build_opinion_frame(self, parent):
+        basics = ttk.LabelFrame(parent, text="Параметры мнений")
         basics.pack(fill="x", padx=10, pady=6)
 
         self.add_entry(basics, "gen_k1", "Порог k1", "0.05")
         self.add_entry(basics, "gen_k2", "Порог k2", "0.5")
         self.add_entry(basics, "gen_tmax", "Количество шагов", "500")
         self.add_entry(basics, "gen_seed", "Seed (пусто = случайный)", "")
+
         ttk.Checkbutton(
             basics, text="Учитывать веса рёбер", variable=self.use_weights_var
         ).pack(anchor="w", padx=6, pady=2)
 
-        stubborn_frame = ttk.LabelFrame(outer, text="Упрямые вершины")
+    def build_stubborn_frame(self, parent):
+        stubborn_frame = ttk.LabelFrame(parent, text="Упрямые вершины")
         stubborn_frame.pack(fill="x", padx=10, pady=6)
 
-        self.add_entry(stubborn_frame, "stubborn", "Количество упрямых (0 = нет)", "5")
+        self.build_stubborn_group(stubborn_frame, "attach", "Прикрепить новые (степень 1)", "5")
+        self.build_stubborn_group(stubborn_frame, "assign", "Назначить существующие", "0")
 
-        mode_frame = ttk.Frame(stubborn_frame)
-        mode_frame.pack(fill="x", padx=6, pady=2)
-        ttk.Radiobutton(
-            mode_frame, text="Случайно", variable=self.stubborn_mode_var, value="random"
-        ).pack(side="left")
-        ttk.Radiobutton(
-            mode_frame, text="Вручную", variable=self.stubborn_mode_var, value="manual"
-        ).pack(side="left")
+    def build_stubborn_group(self, parent, prefix, title, default_count):
+        frame = ttk.LabelFrame(parent, text=title)
+        frame.pack(fill="x", padx=6, pady=4)
 
-        self.add_entry(
-            stubborn_frame, "stubborn_targets", "Цели вручную (через запятую)", ""
+        self.add_entry(frame, f"{prefix}_count", "Количество (0 = нет)", default_count)
+
+        mode_var = tk.StringVar(value="random")
+        self.stubborn_mode_vars[prefix] = mode_var
+
+        row = ttk.Frame(frame)
+        row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(row, text="Выбор вершин", width=LABEL_WIDTH).pack(side="left")
+        ttk.Radiobutton(row, text="Случайно", variable=mode_var, value="random").pack(side="left")
+        ttk.Radiobutton(row, text="Вручную", variable=mode_var, value="manual").pack(
+            side="left", padx=(8, 0)
         )
+
+        self.add_entry(frame, f"{prefix}_targets", "Вершины вручную (через запятую)", "")
+
+    def build_generate_section(self):
+        outer = ttk.Frame(self.scrollable_parent)
+
+        self.build_levels_frame(outer)
+        self.build_opinion_frame(outer)
+        self.build_stubborn_frame(outer)
 
         self.generate_frame = outer
 
@@ -190,7 +206,7 @@ class SimulationForm:
 
         row = ttk.Frame(load_frame)
         row.pack(fill="x", padx=6, pady=2)
-        ttk.Label(row, text="Папка прогона", width=28).pack(side="left")
+        ttk.Label(row, text="Папка прогона", width=LABEL_WIDTH).pack(side="left")
         entry = ttk.Entry(row)
         entry.insert(0, "../build/runs/run_42")
         entry.pack(side="left", fill="x", expand=True)
@@ -201,7 +217,7 @@ class SimulationForm:
 
         graph_choice = ttk.Frame(load_frame)
         graph_choice.pack(fill="x", padx=6, pady=2)
-        ttk.Label(graph_choice, text="Какой граф", width=28).pack(side="left")
+        ttk.Label(graph_choice, text="Какой граф", width=LABEL_WIDTH).pack(side="left")
         ttk.Radiobutton(
             graph_choice, text="Начальный", variable=self.load_graph_var, value="initial"
         ).pack(side="left")
@@ -209,15 +225,14 @@ class SimulationForm:
             graph_choice, text="Конечный", variable=self.load_graph_var, value="final"
         ).pack(side="left")
 
-        hint = ttk.Label(
+        ttk.Label(
             load_frame,
             text=(
                 "Параметры берутся из секции PARAMS файла.\n"
                 "Пустое поле ниже означает «взять из файла»."
             ),
             foreground="gray",
-        )
-        hint.pack(anchor="w", padx=6, pady=(4, 2))
+        ).pack(anchor="w", padx=6, pady=(4, 2))
 
         override_frame = ttk.LabelFrame(outer, text="Переопределить параметры")
         override_frame.pack(fill="x", padx=10, pady=6)
@@ -229,7 +244,7 @@ class SimulationForm:
 
         weights_row = ttk.Frame(override_frame)
         weights_row.pack(fill="x", padx=6, pady=2)
-        ttk.Label(weights_row, text="Веса рёбер", width=28).pack(side="left")
+        ttk.Label(weights_row, text="Веса рёбер", width=LABEL_WIDTH).pack(side="left")
         ttk.Radiobutton(
             weights_row, text="Из файла", variable=self.load_weights_var, value="file"
         ).pack(side="left")
@@ -268,7 +283,7 @@ class SimulationForm:
 
         row = ttk.Frame(frame)
         row.pack(fill="x", padx=6, pady=2)
-        ttk.Label(row, text="Путь к opinion_dynamics", width=28).pack(side="left")
+        ttk.Label(row, text="Путь к opinion_dynamics", width=LABEL_WIDTH).pack(side="left")
         entry = ttk.Entry(row)
         entry.insert(0, BINARY_PATH_DEFAULT)
         entry.pack(side="left", fill="x", expand=True)
@@ -280,7 +295,7 @@ class SimulationForm:
     def add_entry(self, parent, key, label, default_value):
         row = ttk.Frame(parent)
         row.pack(fill="x", padx=6, pady=2)
-        ttk.Label(row, text=label, width=28).pack(side="left")
+        ttk.Label(row, text=label, width=LABEL_WIDTH).pack(side="left")
         entry = ttk.Entry(row)
         entry.insert(0, default_value)
         entry.pack(side="left", fill="x", expand=True)
@@ -331,10 +346,7 @@ class SimulationForm:
     def browse_load_dir(self):
         current = self.get_value("load_dir")
         initial_dir = current if os.path.isdir(current) else "."
-        chosen = filedialog.askdirectory(
-            title="Выберите папку прогона",
-            initialdir=initial_dir,
-        )
+        chosen = filedialog.askdirectory(title="Выберите папку прогона", initialdir=initial_dir)
         if chosen:
             self.fields["load_dir"].delete(0, "end")
             self.fields["load_dir"].insert(0, chosen)
@@ -349,10 +361,8 @@ class SimulationForm:
             self.fields["binary_path"].insert(0, chosen)
 
     def on_source_changed(self):
-        if self.generate_frame is not None:
-            self.generate_frame.pack_forget()
-        if self.load_frame is not None:
-            self.load_frame.pack_forget()
+        self.generate_frame.pack_forget()
+        self.load_frame.pack_forget()
 
         if self.source_var.get() == "generate":
             self.generate_frame.pack(fill="x", before=self.dynamic_frame)
@@ -378,18 +388,15 @@ class SimulationForm:
             raise ValueError(f"Бинарник не найден: {raw}")
 
         script_dir = os.path.dirname(os.path.abspath(__file__))
-
         candidates = [
             os.path.abspath(os.path.join(script_dir, raw)),
             os.path.abspath(raw),
         ]
-        for c in candidates:
-            if os.path.isfile(c):
-                return c
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
 
-        raise ValueError(
-            "Бинарник не найден. Проверено:\n  " + "\n  ".join(candidates)
-        )
+        raise ValueError("Бинарник не найден. Проверено:\n  " + "\n  ".join(candidates))
 
     def on_run_clicked(self):
         try:
@@ -403,11 +410,7 @@ class SimulationForm:
 
         try:
             result = subprocess.run(
-                args,
-                check=True,
-                cwd=project_root,
-                capture_output=True,
-                text=True,
+                args, check=True, cwd=project_root, capture_output=True, text=True
             )
         except subprocess.CalledProcessError as e:
             messagebox.showerror(
@@ -422,8 +425,7 @@ class SimulationForm:
         run_dir = self.detect_run_dir(project_root, seed, result.stdout)
         if run_dir is None:
             messagebox.showerror(
-                "Ошибка",
-                f"Не удалось определить папку прогона.\n\nstdout:\n{result.stdout}",
+                "Ошибка", f"Не удалось определить папку прогона.\n\nstdout:\n{result.stdout}"
             )
             return
 
@@ -459,42 +461,44 @@ class SimulationForm:
 
     def build_command(self, binary_abs):
         args = [binary_abs, "--batch"]
-        seed = None
 
         if self.source_var.get() == "generate":
             args += self.build_generate_args()
             seed = self.parse_seed_optional("gen_seed")
-            if seed is not None:
-                args += ["--seed", str(seed)]
         else:
             args += self.build_load_args()
             seed = self.parse_seed_optional("load_seed")
-            if seed is not None:
-                args += ["--seed", str(seed)]
 
-        if self.dynamic_edges_var.get():
-            args += ["--dynamic-edges"]
-            p0 = self.get_value("p0")
-            k = self.get_value("k")
-            if p0:
-                args += ["--p0", p0]
-            if k:
-                args += ["--k", k]
+        if seed is not None:
+            args += ["--seed", str(seed)]
 
-            if self.remove_edges_var.get():
-                args += ["--remove-edges"]
-                rp0 = self.get_value("remove_p0")
-                rk = self.get_value("remove_k")
-                if rp0:
-                    args += ["--remove-p0", rp0]
-                if rk:
-                    args += ["--remove-k", rk]
-
+        args += self.build_dynamic_edges_args()
         return args, seed
 
-    def build_generate_args(self):
-        args = []
+    def build_dynamic_edges_args(self):
+        if not self.dynamic_edges_var.get():
+            return []
 
+        args = ["--dynamic-edges"]
+        p0 = self.get_value("p0")
+        k = self.get_value("k")
+        if p0:
+            args += ["--p0", p0]
+        if k:
+            args += ["--k", k]
+
+        if self.remove_edges_var.get():
+            args += ["--remove-edges"]
+            remove_p0 = self.get_value("remove_p0")
+            remove_k = self.get_value("remove_k")
+            if remove_p0:
+                args += ["--remove-p0", remove_p0]
+            if remove_k:
+                args += ["--remove-k", remove_k]
+
+        return args
+
+    def build_levels_args(self):
         vertices_list = []
         probabilities_list = []
 
@@ -502,53 +506,89 @@ class SimulationForm:
             v = row["vertices"].get().strip()
             p = row["probability"].get().strip()
             if not v or not p:
-                raise ValueError(f"Уровень {i+1}: заполните оба поля")
+                raise ValueError(f"Уровень {i + 1}: заполните оба поля")
             try:
                 int(v)
                 float(p)
             except ValueError:
-                raise ValueError(
-                    f"Уровень {i+1}: вершин — целое число, вероятность — дробное"
-                )
+                raise ValueError(f"Уровень {i + 1}: вершин — целое число, вероятность — дробное")
             vertices_list.append(v)
             probabilities_list.append(p)
 
-        args += ["--level-vertices", ",".join(vertices_list)]
-        args += ["--level-probabilities", ",".join(probabilities_list)]
+        return [
+            "--level-vertices", ",".join(vertices_list),
+            "--level-probabilities", ",".join(probabilities_list),
+        ]
 
-        stubborn = self.get_value("stubborn")
-        if stubborn:
+    def total_level_vertices(self):
+        total = 0
+        for row in self.level_rows:
+            value = row["vertices"].get().strip()
+            if value:
+                total += int(value)
+        return total
+
+    def parse_stubborn_targets(self, prefix, title, count, unique, total_vertices):
+        targets_str = self.get_value(f"{prefix}_targets")
+        if not targets_str:
+            raise ValueError(f"{title}: выбран ручной режим, но не заданы вершины")
+
+        targets = [t.strip() for t in targets_str.split(",") if t.strip()]
+        if len(targets) != count:
+            raise ValueError(f"{title}: указано {len(targets)} вершин, а количество {count}")
+
+        for t in targets:
             try:
-                stubborn_count = int(stubborn)
+                index = int(t)
             except ValueError:
-                raise ValueError("Количество упрямых должно быть целым числом")
-            if stubborn_count < 0:
-                raise ValueError("Количество упрямых не может быть отрицательным")
+                raise ValueError(f"{title}: вершины должны быть целыми числами через запятую")
+            if index < 0 or index >= total_vertices:
+                raise ValueError(
+                    f"{title}: вершины {index} нет в графе. "
+                    f"Допустимые номера: 0..{total_vertices - 1}"
+                )
 
-            if stubborn_count > 0:
-                mode = self.stubborn_mode_var.get()
-                args += ["--stubborn", str(stubborn_count), "--stubborn-mode", mode]
+        if unique and len(set(targets)) != len(targets):
+            raise ValueError(f"{title}: вершины не должны повторяться")
 
-                if mode == "manual":
-                    targets_str = self.get_value("stubborn_targets")
-                    if not targets_str:
-                        raise ValueError(
-                            "Указан ручной режим, но не заданы цели"
-                        )
-                    targets = [t.strip() for t in targets_str.split(",") if t.strip()]
-                    if len(targets) != stubborn_count:
-                        raise ValueError(
-                            f"Указано {len(targets)} целей, а упрямых {stubborn_count}. "
-                            "Количество должно совпадать."
-                        )
-                    for t in targets:
-                        try:
-                            int(t)
-                        except ValueError:
-                            raise ValueError(
-                                "Цели должны быть целыми числами через запятую"
-                            )
-                    args += ["--stubborn-targets", ",".join(targets)]
+        return targets
+
+    def build_stubborn_group_args(self, prefix, title, unique, total_vertices):
+        count_str = self.get_value(f"{prefix}_count")
+        targets_str = self.get_value(f"{prefix}_targets")
+        mode = self.stubborn_mode_vars[prefix].get()
+
+        try:
+            count = int(count_str) if count_str else 0
+        except ValueError:
+            raise ValueError(f"{title}: количество должно быть целым числом")
+        if count < 0:
+            raise ValueError(f"{title}: количество не может быть отрицательным")
+
+        if count == 0:
+            if mode == "manual" and targets_str:
+                raise ValueError(
+                    f"{title}: указаны вершины, но количество 0. "
+                    "Укажите количество, равное числу вершин в списке"
+                )
+            return []
+
+        args = [f"--stubborn-{prefix}", str(count), f"--stubborn-{prefix}-mode", mode]
+
+        if mode == "manual":
+            targets = self.parse_stubborn_targets(prefix, title, count, unique, total_vertices)
+            args += [f"--stubborn-{prefix}-targets", ",".join(targets)]
+
+        return args
+
+    def build_generate_args(self):
+        args = self.build_levels_args()
+        total_vertices = self.total_level_vertices()
+
+        args += self.build_stubborn_group_args(
+            "attach", "Прикрепить новые", unique=False, total_vertices=total_vertices)
+        args += self.build_stubborn_group_args(
+            "assign", "Назначить существующие", unique=True, total_vertices=total_vertices)
 
         k1 = self.get_value("gen_k1")
         k2 = self.get_value("gen_k2")
@@ -563,9 +603,7 @@ class SimulationForm:
 
         return args
 
-    def build_load_args(self):
-        args = []
-
+    def resolve_load_dir(self):
         load_dir = self.get_value("load_dir")
         if not load_dir:
             raise ValueError("Укажите папку прогона")
@@ -580,20 +618,16 @@ class SimulationForm:
         if not os.path.isdir(load_dir):
             raise ValueError(f"Папка не найдена: {load_dir}")
 
-        args += ["--load-dir", load_dir]
-        args += ["--load-graph", self.load_graph_var.get()]
+        return load_dir
 
-        k1 = self.get_value("load_k1")
-        k2 = self.get_value("load_k2")
-        tmax = self.get_value("load_tmax")
+    def build_load_args(self):
+        args = ["--load-dir", self.resolve_load_dir(), "--load-graph", self.load_graph_var.get()]
 
-        if k1:
-            args += ["--k1", k1]
-        if k2:
-            args += ["--k2", k2]
-        if tmax:
-            args += ["--tmax", tmax]
-        
+        for key, flag in (("load_k1", "--k1"), ("load_k2", "--k2"), ("load_tmax", "--tmax")):
+            value = self.get_value(key)
+            if value:
+                args += [flag, value]
+
         weights_mode = self.load_weights_var.get()
         if weights_mode == "on":
             args.append("--use-weights")
@@ -615,14 +649,10 @@ class SimulationForm:
         initial_graph_path = os.path.join(run_dir, "graph_initial.txt")
         log_path = os.path.join(run_dir, "simulation_log.txt")
 
-        if not os.path.isfile(initial_graph_path):
-            messagebox.showerror(
-                "Ошибка визуализации", f"Нет файла {initial_graph_path}"
-            )
-            return
-        if not os.path.isfile(log_path):
-            messagebox.showerror("Ошибка визуализации", f"Нет файла {log_path}")
-            return
+        for path in (initial_graph_path, log_path):
+            if not os.path.isfile(path):
+                messagebox.showerror("Ошибка визуализации", f"Нет файла {path}")
+                return
 
         try:
             num_vertices, initial_edges, stubborn = parse_graph(initial_graph_path)
