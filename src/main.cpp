@@ -7,9 +7,11 @@
 #include "od/model/EdgeEvolution.hpp"
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <random>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -150,10 +152,10 @@ RuntimeParams collectRuntimeParamsStandalone() {
     return rp;
 }
 
-std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParams() {
+std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParamsInteractive() {
     std::cout << "Выберите способ получения графа:\n";
     std::cout << "1 - Сгенерировать новый граф\n";
-    std::cout << "2 - Загрузить граф из файла\n";
+    std::cout << "2 - Загрузить граф из папки прогона\n";
 
     int choice;
     while (true) {
@@ -193,10 +195,24 @@ std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParams() {
 
         return {std::move(graph), rp};
     } else {
-        std::cout << "Введите имя файла для загрузки: ";
-        std::string filename;
-        std::getline(std::cin, filename);
-        filename = od::io::trim(filename);
+        std::cout << "Введите путь к папке прогона (например, runs/run_42): ";
+        std::string dirPath;
+        std::getline(std::cin, dirPath);
+        dirPath = od::io::trim(dirPath);
+
+        std::cout << "Какой граф загрузить?\n";
+        std::cout << "1 - Начальный (graph_initial.txt)\n";
+        std::cout << "2 - Конечный (graph_final.txt)\n";
+
+        int graphChoice;
+        while (true) {
+            auto val = od::io::readIntInRange("Ввод: ", 1, 2);
+            if (!val.has_value()) continue;
+            graphChoice = *val;
+            break;
+        }
+
+        std::string filename = dirPath + "/" + (graphChoice == 1 ? "graph_initial.txt" : "graph_final.txt");
 
         try {
             od::io::SimulationParams fileParams;
@@ -210,18 +226,6 @@ std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParams() {
                 std::cout << "  seed = " << fileParams.seed << "\n";
                 std::cout << "  T_MAX = " << fileParams.tMax << "\n";
                 std::cout << "  k1 = " << fileParams.k1 << ", k2 = " << fileParams.k2 << "\n";
-                if (fileParams.dynamicEdges) {
-                    std::cout << "  dynamicEdges: p0 = " << fileParams.p0
-                              << ", k = " << fileParams.k << "\n";
-                    if (fileParams.removeEdges) {
-                        std::cout << "  removeEdges: removeP0 = " << fileParams.removeP0
-                                  << ", removeK = " << fileParams.removeK << "\n";
-                    } else {
-                        std::cout << "  removeEdges: выключены\n";
-                    }
-                } else {
-                    std::cout << "  dynamicEdges: выключены\n";
-                }
 
                 bool useLoaded = od::io::readYesNo("Использовать эти параметры? (y - да, n - ввести свои): ");
                 if (useLoaded) {
@@ -252,9 +256,324 @@ std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParams() {
     }
 }
 
-int main() {
-    auto [graph, rp] = setupGraphAndParams();
+struct BatchArgs {
+    bool generate = true;
 
+    std::vector<int> levelVertices;
+    std::vector<double> levelProbabilities;
+
+    bool stubborn_set = false;
+    int stubborn = 0;
+    std::string stubbornMode = "random";
+    std::string stubbornTargets;
+
+    std::string loadDir;
+    std::string loadGraph = "initial";
+
+    bool k1_set = false;
+    double k1 = 0.0;
+    bool k2_set = false;
+    double k2 = 1.0;
+    bool tMax_set = false;
+    int tMax = 500;
+    bool seed_set = false;
+    unsigned int seed = 0;
+
+    bool dynamicEdges = false;
+    bool dynamicEdges_set = false;
+    bool p0_set = false;
+    double p0 = 0.0;
+    bool k_add_set = false;
+    double k = 0.0;
+
+    bool removeEdges = false;
+    bool removeEdges_set = false;
+    bool removeP0_set = false;
+    double removeP0 = 0.0;
+    bool removeK_set = false;
+    double removeK = 0.0;
+};
+
+void printBatchUsage() {
+    std::cout << "Использование batch-режима:\n\n";
+    std::cout << "Генерация графа:\n";
+    std::cout << "  --batch --level-vertices \"10,20,15\" --level-probabilities \"0.3,0.5,0.4\"\n";
+    std::cout << "  или (один уровень):\n";
+    std::cout << "  --batch --vertices 100 --probability 0.3\n\n";
+    std::cout << "Загрузка из папки прогона:\n";
+    std::cout << "  --batch --load-dir runs/run_42 [--load-graph initial|final]\n\n";
+    std::cout << "Обязательные параметры симуляции (если не подгружаются из файла):\n";
+    std::cout << "  --k1 X --k2 Y [--tmax N] [--seed N]\n\n";
+    std::cout << "Опции:\n";
+    std::cout << "  --stubborn N [--stubborn-mode random|manual] [--stubborn-targets 0,2,4]\n";
+    std::cout << "  --dynamic-edges --p0 X --k Y\n";
+    std::cout << "  --remove-edges --remove-p0 X --remove-k Y\n";
+}
+
+std::string nextArgValue(int argc, char** argv, int& i, const std::string& flag) {
+    if (i + 1 >= argc) {
+        std::cout << "Ошибка: флагу " << flag << " не хватает значения\n";
+        std::exit(1);
+    }
+    ++i;
+    return std::string(argv[i]);
+}
+
+int parseIntArg(const std::string& value, const std::string& flag) {
+    try {
+        return std::stoi(value);
+    } catch (...) {
+        std::cout << "Ошибка: некорректное число для " << flag << ": " << value << "\n";
+        std::exit(1);
+    }
+    return 0;
+}
+
+double parseDoubleArg(const std::string& value, const std::string& flag) {
+    try {
+        return std::stod(value);
+    } catch (...) {
+        std::cout << "Ошибка: некорректное число для " << flag << ": " << value << "\n";
+        std::exit(1);
+    }
+    return 0.0;
+}
+
+std::vector<int> parseIntList(const std::string& csv, const std::string& flag) {
+    std::vector<int> result;
+    std::stringstream ss(csv);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (item.empty()) continue;
+        try {
+            result.push_back(std::stoi(item));
+        } catch (...) {
+            std::cout << "Ошибка: некорректное число в " << flag << ": '" << item << "'\n";
+            std::exit(1);
+        }
+    }
+    return result;
+}
+
+std::vector<double> parseDoubleList(const std::string& csv, const std::string& flag) {
+    std::vector<double> result;
+    std::stringstream ss(csv);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        if (item.empty()) continue;
+        try {
+            result.push_back(std::stod(item));
+        } catch (...) {
+            std::cout << "Ошибка: некорректное число в " << flag << ": '" << item << "'\n";
+            std::exit(1);
+        }
+    }
+    return result;
+}
+
+BatchArgs parseBatchArgs(int argc, char** argv) {
+    BatchArgs args;
+    bool vertices_set = false;
+    int single_vertices = 0;
+    bool probability_set = false;
+    double single_probability = 0.0;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string flag = argv[i];
+
+        if (flag == "--batch") {
+            continue;
+        } else if (flag == "--level-vertices") {
+            args.levelVertices = parseIntList(nextArgValue(argc, argv, i, flag), flag);
+        } else if (flag == "--level-probabilities") {
+            args.levelProbabilities = parseDoubleList(nextArgValue(argc, argv, i, flag), flag);
+        } else if (flag == "--vertices") {
+            single_vertices = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
+            vertices_set = true;
+        } else if (flag == "--probability") {
+            single_probability = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            probability_set = true;
+        } else if (flag == "--load-dir") {
+            args.loadDir = nextArgValue(argc, argv, i, flag);
+            args.generate = false;
+        } else if (flag == "--load-graph") {
+            args.loadGraph = nextArgValue(argc, argv, i, flag);
+            if (args.loadGraph != "initial" && args.loadGraph != "final") {
+                std::cout << "Ошибка: --load-graph должен быть 'initial' или 'final'\n";
+                std::exit(1);
+            }
+        } else if (flag == "--stubborn") {
+            args.stubborn = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
+            args.stubborn_set = true;
+        } else if (flag == "--stubborn-mode") {
+            args.stubbornMode = nextArgValue(argc, argv, i, flag);
+        } else if (flag == "--stubborn-targets") {
+            args.stubbornTargets = nextArgValue(argc, argv, i, flag);
+        } else if (flag == "--k1") {
+            args.k1 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            args.k1_set = true;
+        } else if (flag == "--k2") {
+            args.k2 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            args.k2_set = true;
+        } else if (flag == "--tmax") {
+            args.tMax = parseIntArg(nextArgValue(argc, argv, i, flag), flag);
+            args.tMax_set = true;
+        } else if (flag == "--seed") {
+            args.seed = static_cast<unsigned int>(parseIntArg(nextArgValue(argc, argv, i, flag), flag));
+            args.seed_set = true;
+        } else if (flag == "--dynamic-edges") {
+            args.dynamicEdges = true;
+            args.dynamicEdges_set = true;
+        } else if (flag == "--p0") {
+            args.p0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            args.p0_set = true;
+        } else if (flag == "--k") {
+            args.k = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            args.k_add_set = true;
+        } else if (flag == "--remove-edges") {
+            args.removeEdges = true;
+            args.removeEdges_set = true;
+        } else if (flag == "--remove-p0") {
+            args.removeP0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            args.removeP0_set = true;
+        } else if (flag == "--remove-k") {
+            args.removeK = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+            args.removeK_set = true;
+        } else {
+            std::cout << "Неизвестный флаг: " << flag << "\n";
+            printBatchUsage();
+            std::exit(1);
+        }
+    }
+
+    if (args.generate) {
+        if (vertices_set && probability_set) {
+            args.levelVertices = {single_vertices};
+            args.levelProbabilities = {single_probability};
+        }
+
+        if (args.levelVertices.empty() || args.levelProbabilities.empty()) {
+            std::cout << "Ошибка: не заданы уровни\n";
+            printBatchUsage();
+            std::exit(1);
+        }
+
+        if (args.levelVertices.size() != args.levelProbabilities.size()) {
+            std::cout << "Ошибка: количество уровней в --level-vertices и --level-probabilities не совпадает\n";
+            std::exit(1);
+        }
+    }
+
+    return args;
+}
+
+od::config::ManualGenConfig buildConfigFromBatchArgs(const BatchArgs& args) {
+    od::config::ManualGenConfig cnf;
+    cnf.cntLevels = static_cast<int>(args.levelVertices.size());
+
+    cnf.components.clear();
+    for (size_t i = 0; i < args.levelVertices.size(); ++i) {
+        cnf.components.push_back(
+            od::config::LevelConfig{args.levelVertices[i], args.levelProbabilities[i]});
+    }
+
+    cnf.generateStubborn = args.stubborn_set && args.stubborn > 0;
+    cnf.numStubbornVertices = args.stubborn;
+    cnf.stubbornManualAttach = (args.stubbornMode == "manual");
+    if (cnf.stubbornManualAttach && !args.stubbornTargets.empty()) {
+        cnf.stubbornTargets = parseIntList(args.stubbornTargets, "--stubborn-targets");
+    }
+
+    cnf.dynamicEdges = args.dynamicEdges;
+    cnf.p0 = args.p0;
+    cnf.k = args.k;
+    cnf.removeEdges = args.removeEdges;
+    cnf.removeP0 = args.removeP0;
+    cnf.removeK = args.removeK;
+
+    cnf.k1 = args.k1;
+    cnf.k2 = args.k2;
+
+    return cnf;
+}
+
+std::pair<od::graph::Graph, RuntimeParams> setupGraphAndParamsBatch(const BatchArgs& args) {
+    if (args.generate) {
+        od::config::ManualGenConfig cnf = buildConfigFromBatchArgs(args);
+
+        auto result = od::config::validateConfig(cnf);
+        if (!result.isValid) {
+            std::cout << "Ошибка конфигурации: " << result.errorMessage << "\n";
+            std::exit(1);
+        }
+
+        od::graph::Graph graph = od::graph::generateManualGraph(cnf);
+
+        RuntimeParams rp;
+        rp.k1 = cnf.k1;
+        rp.k2 = cnf.k2;
+        rp.dynamicEdges = cnf.dynamicEdges;
+        rp.p0 = cnf.p0;
+        rp.k = cnf.k;
+        rp.removeEdges = cnf.removeEdges;
+        rp.removeP0 = cnf.removeP0;
+        rp.removeK = cnf.removeK;
+        rp.tMax = args.tMax;
+        rp.seed = args.seed;
+        rp.seedSpecified = args.seed_set;
+
+        return {std::move(graph), rp};
+    } else {
+        std::string filename = args.loadDir + "/"
+            + (args.loadGraph == "final" ? "graph_final.txt" : "graph_initial.txt");
+
+        od::io::SimulationParams fileParams;
+        bool paramsLoaded = false;
+        od::graph::Graph graph = od::io::loadGraphWithParams(filename, fileParams, paramsLoaded);
+
+        RuntimeParams rp;
+
+        if (paramsLoaded) {
+            rp.k1 = fileParams.k1;
+            rp.k2 = fileParams.k2;
+            rp.dynamicEdges = fileParams.dynamicEdges;
+            rp.p0 = fileParams.p0;
+            rp.k = fileParams.k;
+            rp.removeEdges = fileParams.removeEdges;
+            rp.removeP0 = fileParams.removeP0;
+            rp.removeK = fileParams.removeK;
+            rp.tMax = fileParams.tMax;
+            rp.seed = fileParams.seed;
+            rp.seedSpecified = true;
+        }
+
+        if (args.k1_set) rp.k1 = args.k1;
+        if (args.k2_set) rp.k2 = args.k2;
+        if (args.tMax_set) rp.tMax = args.tMax;
+        if (args.seed_set) {
+            rp.seed = args.seed;
+            rp.seedSpecified = true;
+        }
+        if (args.dynamicEdges_set) rp.dynamicEdges = args.dynamicEdges;
+        if (args.p0_set) rp.p0 = args.p0;
+        if (args.k_add_set) rp.k = args.k;
+        if (args.removeEdges_set) rp.removeEdges = args.removeEdges;
+        if (args.removeP0_set) rp.removeP0 = args.removeP0;
+        if (args.removeK_set) rp.removeK = args.removeK;
+
+        if (!paramsLoaded) {
+            bool hasAll = args.k1_set && args.k2_set && args.tMax_set;
+            if (!hasAll) {
+                std::cout << "Ошибка: в файле нет PARAMS, нужно задать --k1, --k2, --tmax флагами\n";
+                std::exit(1);
+            }
+        }
+
+        return {std::move(graph), rp};
+    }
+}
+
+void runSimulation(od::graph::Graph graph, RuntimeParams rp) {
     GraphStats stats = computeStats(graph);
     printStats("Статистика графа", stats);
 
@@ -283,8 +602,7 @@ int main() {
 
     try {
         od::io::saveGraphWithParams(graph, paramsForFile, initialGraphFile);
-        std::cout << "Начальный граф сохранён в " << initialGraphFile
-                  << " (вместе с параметрами)\n";
+        std::cout << "Начальный граф сохранён в " << initialGraphFile << "\n";
     } catch (const std::exception& e) {
         std::cout << "Ошибка сохранения начального графа: " << e.what() << "\n";
     }
@@ -292,27 +610,10 @@ int main() {
     std::vector<int> opinions = od::model::initOpinions(graph);
 
     std::cout << "\n=== Параметры симуляции ===\n";
-    std::cout << "Seed: " << seed
-              << (rp.seedSpecified ? " (задан пользователем)" : " (сгенерирован)") << "\n";
+    std::cout << "Seed: " << seed << "\n";
     std::cout << "Папка прогона: " << runDir << "\n";
     std::cout << "T_MAX = " << rp.tMax << "\n";
     std::cout << "k1 = " << rp.k1 << ", k2 = " << rp.k2 << "\n";
-    if (rp.dynamicEdges) {
-        std::cout << "dynamicEdges: p0 = " << rp.p0 << ", k = " << rp.k << "\n";
-        if (rp.removeEdges) {
-            std::cout << "removeEdges: removeP0 = " << rp.removeP0
-                      << ", removeK = " << rp.removeK << "\n";
-        } else {
-            std::cout << "removeEdges: выключены\n";
-        }
-    } else {
-        std::cout << "dynamicEdges: выключены\n";
-    }
-
-    int initialOnes = 0;
-    for (int v : opinions) if (v == 1) ++initialOnes;
-    std::cout << "Начальное состояние: мнение 1 у " << initialOnes
-              << " (упрямых " << stats.stubbornCount << ")\n\n";
 
     od::io::SimulationLog log;
     log.seed = seed;
@@ -359,8 +660,7 @@ int main() {
 
         bool printThisStep = (t < 100) || (t % 50 == 0) || (t == rp.tMax - 1);
         if (printThisStep) {
-            std::cout << "Шаг " << stepNumber
-                      << ": мнение 1 у " << ones
+            std::cout << "Шаг " << stepNumber << ": мнение 1 у " << ones
                       << " из " << graph.getNumVertices()
                       << " вершин, рёбер " << edgesNow << "\n";
         }
@@ -373,8 +673,6 @@ int main() {
     std::cout << "После " << rp.tMax << " шагов: мнение 1 у " << countOnes
               << " из " << graph.getNumVertices() << " вершин\n";
     std::cout << "Всего рёбер в графе: " << countEdges(graph) << "\n";
-    std::cout << "Всего изменений мнений: " << log.opinionChanges.size() << "\n";
-    std::cout << "Всего событий с рёбрами: " << log.edgeEvents.size() << "\n\n";
 
     log.finalOpinions = opinions;
 
@@ -390,6 +688,24 @@ int main() {
         std::cout << "Лог симуляции сохранён в " << logFile << "\n";
     } catch (const std::exception& e) {
         std::cout << "Ошибка сохранения лога: " << e.what() << "\n";
+    }
+}
+
+bool hasBatchFlag(int argc, char** argv) {
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--batch") == 0) return true;
+    }
+    return false;
+}
+
+int main(int argc, char** argv) {
+    if (hasBatchFlag(argc, argv)) {
+        BatchArgs args = parseBatchArgs(argc, argv);
+        auto [graph, rp] = setupGraphAndParamsBatch(args);
+        runSimulation(std::move(graph), rp);
+    } else {
+        auto [graph, rp] = setupGraphAndParamsInteractive();
+        runSimulation(std::move(graph), rp);
     }
 
     return 0;
