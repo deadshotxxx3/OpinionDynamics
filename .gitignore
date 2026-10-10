@@ -9,3 +9,4 @@ CMakeCache.txt
 cmake_install.cmake
 venv
 __pycache__
+.pytest_cache
