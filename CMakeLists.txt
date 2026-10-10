@@ -16,4 +16,5 @@ add_executable(opinion_dynamics
     src/model/DynamicsModel.cpp
     src/model/EdgeEvolution.cpp
     src/io/SimulationLog.cpp
+    src/model/ProbabilityFunction.cpp
 )
