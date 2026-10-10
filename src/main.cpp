@@ -28,25 +28,15 @@ struct GraphStats {
 GraphStats computeStats(const od::graph::Graph& graph) {
     GraphStats stats;
     stats.numVertices = graph.getNumVertices();
+    stats.numEdges = graph.getNumEdges();
 
-    long long totalDegree = 0;
     for (int v = 0; v < stats.numVertices; ++v) {
-        totalDegree += static_cast<long long>(graph.getNeighbors(v).size());
         if (graph.isStubborn(v)) ++stats.stubbornCount;
     }
-    stats.numEdges = totalDegree / 2;
     stats.avgDegree = stats.numVertices > 0
-        ? static_cast<double>(totalDegree) / stats.numVertices
+        ? 2.0 * static_cast<double>(stats.numEdges) / stats.numVertices
         : 0.0;
     return stats;
-}
-
-long long countEdges(const od::graph::Graph& graph) {
-    long long totalDegree = 0;
-    for (int v = 0; v < graph.getNumVertices(); ++v) {
-        totalDegree += static_cast<long long>(graph.getNeighbors(v).size());
-    }
-    return totalDegree / 2;
 }
 
 void printStats(const std::string& label, const GraphStats& stats) {
@@ -804,7 +794,7 @@ void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions,
         }
     }
 
-    long long edgesNow = countEdges(graph);
+    long long edgesNow = graph.getNumEdges();
     log.history.push_back(od::io::StepRecord{ones, edgesNow});
 
     bool printThisStep = (t < 100) || (t % 50 == 0) || (t == rp.tMax - 1);
@@ -870,7 +860,7 @@ void runSimulation(od::graph::Graph graph, RuntimeParams rp) {
     std::cout << "\n=== Итог ===\n";
     std::cout << "После " << rp.tMax << " шагов: мнение 1 у " << countOnes
               << " из " << graph.getNumVertices() << " вершин\n";
-    std::cout << "Всего рёбер в графе: " << countEdges(graph) << "\n";
+    std::cout << "Всего рёбер в графе: " << graph.getNumEdges() << "\n";
 
     log.finalOpinions = opinions;
     saveResults(graph, log, finalGraphFile, logFile);

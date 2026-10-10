@@ -1,5 +1,7 @@
 #include "od/model/EdgeEvolution.hpp"
 
+#include <optional>
+
 namespace od::model {
 
 namespace {
@@ -18,9 +20,10 @@ void tryRemoveEdge(Graph& graph, int u, int v, double probability,
                    std::uniform_real_distribution<double>& dist, std::mt19937& rng,
                    int step, std::vector<EdgeEvent>& events) {
     if (dist(rng) < probability) {
-        double oldWeight = graph.getNeighbors(u).at(v);
-        graph.removeEdge(u, v);
-        events.push_back(EdgeEvent{step, false, u, v, oldWeight});
+        std::optional<double> oldWeight = graph.removeEdge(u, v);
+        if (oldWeight.has_value()) {
+            events.push_back(EdgeEvent{step, false, u, v, *oldWeight});
+        }
     }
 }
 
