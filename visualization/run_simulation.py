@@ -1,20 +1,34 @@
 import os
+import sys
 import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
-from visualize import (
-    parse_graph,
-    parse_log,
-    run_graph_viewer,
-    run_dynamics_only,
-    build_states,
-    MAX_VISUAL_VERTICES,
-)
-
 
 BINARY_PATH_DEFAULT = "../build/opinion_dynamics"
+VISUALIZE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visualize.py")
+VISUALIZE_CHECK_DELAY_MS = 3000
 LABEL_WIDTH = 28
+
+EDGE_FUNCTIONS = [
+    ("constant", "Константная", "p = a", "a", 1, "0.01"),
+    ("linear", "Линейная", "p = a + b·t", "a, b", 2, "0.01, 0.0001"),
+    ("polynomial", "Полиномиальная", "p = c0 + c1·t + c2·t² + ...", "c0, c1, c2, ...", -1,
+     "0.001, 0, 0.000001"),
+    ("exponential", "Экспоненциальная", "p = a·e^(b·t)", "a, b", 2, "0.001, 0.02"),
+    ("saturation", "Насыщение", "p = pmax·(1 − e^(−r·t))", "pmax, r", 2, "0.02, 0.05"),
+    ("logistic", "Логистическая", "p = pmax / (1 + e^(−r·(t − t0)))", "pmax, r, t0", 3,
+     "0.02, 0.1, 50"),
+    ("step", "Ступенчатая", "p = a при t < T, иначе b", "a, b, T", 3, "0.001, 0.02, 100"),
+    ("periodic", "Периодическая", "p = a + b·sin(w·t)", "a, b, w", 3, "0.01, 0.005, 0.1"),
+]
+
+FUNCTION_BY_DISPLAY = {display: (name, hint, count, default)
+                       for name, display, _, hint, count, default in EDGE_FUNCTIONS}
+
+FORMULA_BY_DISPLAY = {display: formula for _, display, formula, _, _, _ in EDGE_FUNCTIONS}
+
+COMBOBOX_WIDTH = max(len(display) for _, display, _, _, _, _ in EDGE_FUNCTIONS) + 2
 
 
 class SimulationForm:
@@ -27,6 +41,9 @@ class SimulationForm:
         self.fields = {}
         self.level_rows = []
         self.stubborn_mode_vars = {}
+        self.function_vars = {}
+        self.function_hints = {}
+
         self.dynamic_edges_var = tk.BooleanVar()
         self.remove_edges_var = tk.BooleanVar()
         self.visualize_var = tk.BooleanVar(value=True)
@@ -100,10 +117,20 @@ class SimulationForm:
         self.canvas.bind_all("<Button-4>", self._wheel_linux)
         self.canvas.bind_all("<Button-5>", self._wheel_linux)
 
+    def _is_inside_dropdown(self, event):
+        widget = event.widget
+        if isinstance(widget, str):
+            return True
+        return widget.winfo_class() in ("Listbox", "TCombobox", "ComboboxPopdown")
+
     def _wheel_windows(self, event):
+        if self._is_inside_dropdown(event):
+            return
         self.canvas.yview_scroll(int(-event.delta / 120), "units")
 
     def _wheel_linux(self, event):
+        if self._is_inside_dropdown(event):
+            return
         if event.num == 4:
             self.canvas.yview_scroll(-1, "units")
         elif event.num == 5:
@@ -261,21 +288,61 @@ class SimulationForm:
         frame = ttk.LabelFrame(self.scrollable_parent, text="Динамика рёбер")
         frame.pack(fill="x", padx=10, pady=6)
 
-        ttk.Checkbutton(
-            frame, text="Добавление рёбер", variable=self.dynamic_edges_var
-        ).pack(anchor="w", padx=6)
-
-        self.add_entry(frame, "p0", "p0 (добавление)", "0.05")
-        self.add_entry(frame, "k", "k (добавление)", "0.001")
-
-        ttk.Checkbutton(
-            frame, text="Удаление рёбер", variable=self.remove_edges_var
-        ).pack(anchor="w", padx=6, pady=(6, 0))
-
-        self.add_entry(frame, "remove_p0", "p0 (удаление)", "0.0")
-        self.add_entry(frame, "remove_k", "k (удаление)", "0.0")
+        self.build_function_group(
+            frame, "add", "Появление рёбер", self.dynamic_edges_var, default_name="linear")
+        self.build_function_group(
+            frame, "remove", "Удаление рёбер", self.remove_edges_var, default_name="constant")
 
         self.dynamic_frame = frame
+
+    def build_function_group(self, parent, prefix, title, enabled_var, default_name):
+        group = ttk.LabelFrame(parent, text=title)
+        group.pack(fill="x", padx=6, pady=4)
+
+        ttk.Checkbutton(group, text="Включить", variable=enabled_var).pack(anchor="w", padx=6)
+
+        displays = [display for _, display, _, _, _, _ in EDGE_FUNCTIONS]
+        default_display = next(d for n, d, _, _, _, _ in EDGE_FUNCTIONS if n == default_name)
+
+        row = ttk.Frame(group)
+        row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(row, text="Функция", width=LABEL_WIDTH).pack(side="left")
+        function_var = tk.StringVar(value=default_display)
+        combo = ttk.Combobox(
+            row,
+            textvariable=function_var,
+            values=displays,
+            state="readonly",
+            width=COMBOBOX_WIDTH,
+            height=len(displays),
+        )
+        combo.pack(side="left")
+        self.function_vars[prefix] = function_var
+
+        for sequence in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            combo.bind(sequence, lambda e: "break")
+
+        formula_row = ttk.Frame(group)
+        formula_row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(formula_row, text="Формула", width=LABEL_WIDTH).pack(side="left")
+        hint = ttk.Label(formula_row, text="")
+        hint.pack(side="left", anchor="w")
+        self.function_hints[prefix] = hint
+
+        self.add_entry(group, f"{prefix}_params", "Параметры (через запятую)", "")
+
+        combo.bind("<<ComboboxSelected>>", lambda e, p=prefix: self.on_function_changed(p))
+        self.on_function_changed(prefix)
+
+    def on_function_changed(self, prefix):
+        display = self.function_vars[prefix].get()
+        _, hint, _, default = FUNCTION_BY_DISPLAY[display]
+        self.function_hints[prefix].config(
+            text=f"{FORMULA_BY_DISPLAY[display]}    (параметры: {hint})"
+        )
+        entry = self.fields[f"{prefix}_params"]
+        entry.delete(0, "end")
+        entry.insert(0, default)
 
     def build_binary_section(self):
         frame = ttk.LabelFrame(self.scrollable_parent, text="Бинарник")
@@ -475,26 +542,36 @@ class SimulationForm:
         args += self.build_dynamic_edges_args()
         return args, seed
 
+    def parse_function_params(self, prefix, title):
+        name, hint, expected, _ = FUNCTION_BY_DISPLAY[self.function_vars[prefix].get()]
+        raw = self.get_value(f"{prefix}_params")
+        values = [v.strip() for v in raw.split(",") if v.strip()]
+
+        for v in values:
+            try:
+                float(v)
+            except ValueError:
+                raise ValueError(f"{title}: параметры должны быть числами через запятую")
+
+        if expected == -1 and len(values) < 1:
+            raise ValueError(f"{title}: нужен хотя бы один коэффициент ({hint})")
+        if expected != -1 and len(values) != expected:
+            raise ValueError(
+                f"{title}: нужно параметров {expected} ({hint}), указано {len(values)}"
+            )
+
+        return name, ",".join(values)
+
     def build_dynamic_edges_args(self):
         if not self.dynamic_edges_var.get():
             return []
 
-        args = ["--dynamic-edges"]
-        p0 = self.get_value("p0")
-        k = self.get_value("k")
-        if p0:
-            args += ["--p0", p0]
-        if k:
-            args += ["--k", k]
+        name, params = self.parse_function_params("add", "Появление рёбер")
+        args = ["--dynamic-edges", "--add-func", name, "--add-params", params]
 
         if self.remove_edges_var.get():
-            args += ["--remove-edges"]
-            remove_p0 = self.get_value("remove_p0")
-            remove_k = self.get_value("remove_k")
-            if remove_p0:
-                args += ["--remove-p0", remove_p0]
-            if remove_k:
-                args += ["--remove-k", remove_k]
+            name, params = self.parse_function_params("remove", "Удаление рёбер")
+            args += ["--remove-edges", "--remove-func", name, "--remove-params", params]
 
         return args
 
@@ -655,17 +732,26 @@ class SimulationForm:
                 return
 
         try:
-            num_vertices, initial_edges, stubborn = parse_graph(initial_graph_path)
-            log = parse_log(log_path)
+            process = subprocess.Popen(
+                [sys.executable, VISUALIZE_SCRIPT, run_dir],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except OSError as e:
+            messagebox.showerror("Ошибка визуализации", f"Не удалось запустить visualize.py:\n{e}")
+            return
 
-            if num_vertices > MAX_VISUAL_VERTICES:
-                run_dynamics_only(log)
-                return
+        self.root.after(VISUALIZE_CHECK_DELAY_MS, lambda: self.check_visualization(process))
 
-            states = build_states(num_vertices, initial_edges, stubborn, log)
-            run_graph_viewer(num_vertices, stubborn, states, log["t_max"])
-        except Exception as e:
-            messagebox.showerror("Ошибка визуализации", str(e))
+    def check_visualization(self, process):
+        if process.poll() is None or process.returncode == 0:
+            return
+
+        output, _ = process.communicate()
+        lines = output.strip().splitlines()
+        message = "\n".join(lines[-15:]) if lines else f"Код возврата: {process.returncode}"
+        messagebox.showerror("Ошибка визуализации", message)
 
 
 def main():
