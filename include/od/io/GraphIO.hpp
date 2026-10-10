@@ -1,6 +1,10 @@
 #pragma once
 
 #include "od/graph/Graph.hpp"
+#include "od/model/ProbabilityFunction.hpp"
+
+#include <istream>
+#include <ostream>
 #include <string>
 
 namespace od::io {
@@ -10,14 +14,15 @@ struct SimulationParams {
     int tMax = 0;
     double k1 = 0.0;
     double k2 = 1.0;
-    bool dynamicEdges = false;
-    double p0 = 0.0;
-    double k = 0.0;
-    bool removeEdges = false;
-    double removeP0 = 0.0;
-    double removeK = 0.0;
     bool useWeights = false;
+    bool dynamicEdges = false;
+    od::model::ProbabilityFunction edgeAddFunction;
+    bool removeEdges = false;
+    od::model::ProbabilityFunction edgeRemoveFunction;
 };
+
+void writeFunction(std::ostream& out, const od::model::ProbabilityFunction& function);
+od::model::ProbabilityFunction readFunction(std::istream& in, const std::string& source);
 
 void saveGraph(const od::graph::Graph& graph, const std::string& filename);
 od::graph::Graph loadGraph(const std::string& filename);

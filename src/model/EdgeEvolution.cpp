@@ -2,13 +2,29 @@
 
 namespace od::model {
 
-double linearProbability(double p0, double k, int t) {
-    double p = p0 + k * static_cast<double>(t);
+namespace {
 
-    if (p > 1.0) return 1.0;
-    if (p < 0.0) return 0.0;
-    return p;
+void tryAddEdge(Graph& graph, int u, int v, double probability,
+                std::uniform_real_distribution<double>& dist, std::mt19937& rng,
+                int step, std::vector<EdgeEvent>& events) {
+    if (dist(rng) < probability) {
+        double weight = dist(rng);
+        graph.addEdge(u, v, weight);
+        events.push_back(EdgeEvent{step, true, u, v, weight});
+    }
 }
+
+void tryRemoveEdge(Graph& graph, int u, int v, double probability,
+                   std::uniform_real_distribution<double>& dist, std::mt19937& rng,
+                   int step, std::vector<EdgeEvent>& events) {
+    if (dist(rng) < probability) {
+        double oldWeight = graph.getNeighbors(u).at(v);
+        graph.removeEdge(u, v);
+        events.push_back(EdgeEvent{step, false, u, v, oldWeight});
+    }
+}
+
+} // namespace
 
 void evolveEdges(
     Graph& graph,
@@ -18,6 +34,10 @@ void evolveEdges(
     int step,
     std::vector<EdgeEvent>& events
 ) {
+    if (addProbability <= 0.0 && removeProbability <= 0.0) {
+        return;
+    }
+
     int n = graph.getNumVertices();
     std::uniform_real_distribution<double> dist(0.0, 1.0);
 
@@ -26,19 +46,9 @@ void evolveEdges(
             bool exists = graph.hasEdge(u, v);
 
             if (!exists && addProbability > 0.0) {
-                if (dist(rng) < addProbability) {
-                    double weight = dist(rng);
-                    graph.addEdge(u, v, weight);
-                    events.push_back(EdgeEvent{step, true, u, v, weight});
-                }
+                tryAddEdge(graph, u, v, addProbability, dist, rng, step, events);
             } else if (exists && removeProbability > 0.0) {
-                if (dist(rng) < removeProbability) {
-                    const auto& neighbors = graph.getNeighbors(u);
-                    auto it = neighbors.find(v);
-                    double oldWeight = (it != neighbors.end()) ? it->second : 0.0;
-                    graph.removeEdge(u, v);
-                    events.push_back(EdgeEvent{step, false, u, v, oldWeight});
-                }
+                tryRemoveEdge(graph, u, v, removeProbability, dist, rng, step, events);
             }
         }
     }

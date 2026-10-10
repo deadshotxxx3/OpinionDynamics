@@ -2,7 +2,7 @@ import sys
 import os
 
 import matplotlib
-matplotlib.use("TkAgg")
+matplotlib.use("QtAgg")
 
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider, Button
@@ -11,6 +11,9 @@ import networkx as nx
 
 MAX_VISUAL_VERTICES = 100
 
+INT_PARAM_KEYS = {"SEED", "T_MAX", "USE_WEIGHTS", "DYNAMIC_EDGES", "REMOVE_EDGES"}
+FUNCTION_PARAM_KEYS = {"ADD_FUNCTION", "REMOVE_FUNCTION"}
+
 
 class TokenReader:
     def __init__(self, filepath):
@@ -18,7 +21,14 @@ class TokenReader:
             self._tokens = f.read().split()
         self._pos = 0
 
+    def peek(self):
+        if self._pos >= len(self._tokens):
+            return None
+        return self._tokens[self._pos]
+
     def next(self):
+        if self._pos >= len(self._tokens):
+            raise ValueError("Неожиданный конец файла")
         token = self._tokens[self._pos]
         self._pos += 1
         return token
@@ -33,11 +43,6 @@ class TokenReader:
         token = self.next()
         if token != expected:
             raise ValueError(f"Ожидался токен '{expected}', получен '{token}'")
-    
-    def peek(self):
-        if self._pos >= len(self._tokens):
-            return None
-        return self._tokens[self._pos]
 
 
 def parse_graph(filepath):
@@ -62,45 +67,29 @@ def parse_graph(filepath):
     return num_vertices, edges, stubborn
 
 
-def parse_log_params(reader):
-    reader.expect("SEED")
-    seed = reader.next_int()
-    reader.expect("T_MAX")
-    t_max = reader.next_int()
-    reader.expect("K1")
-    k1 = reader.next_float()
-    reader.expect("K2")
-    k2 = reader.next_float()
-    reader.expect("DYNAMIC_EDGES")
-    dynamic_edges = reader.next_int()
-    reader.expect("P0")
-    p0 = reader.next_float()
-    reader.expect("K")
-    k = reader.next_float()
-    reader.expect("REMOVE_EDGES")
-    remove_edges = reader.next_int()
-    reader.expect("REMOVE_P0")
-    remove_p0 = reader.next_float()
-    reader.expect("REMOVE_K")
-    remove_k = reader.next_float()
-    use_weights = 0
-    if reader.peek() == "USE_WEIGHTS":
-        reader.next()
-        use_weights = reader.next_int()
+def read_function(reader):
+    name = reader.next()
+    count = reader.next_int()
+    params = [reader.next_float() for _ in range(count)]
+    return {"name": name, "params": params}
 
-    return {
-        "seed": seed,
-        "t_max": t_max,
-        "k1": k1,
-        "k2": k2,
-        "dynamic_edges": dynamic_edges,
-        "p0": p0,
-        "k": k,
-        "remove_edges": remove_edges,
-        "remove_p0": remove_p0,
-        "remove_k": remove_k,
-        "use_weights": use_weights,
-    }
+
+def parse_log_params(reader):
+    params = {}
+    while reader.peek() != "INITIAL_GRAPH_FILE":
+        if reader.peek() is None:
+            raise ValueError("В логе нет секции INITIAL_GRAPH_FILE")
+
+        key = reader.next()
+        if key in FUNCTION_PARAM_KEYS:
+            params[key.lower()] = read_function(reader)
+        elif key in INT_PARAM_KEYS:
+            params[key.lower()] = reader.next_int()
+        else:
+            params[key.lower()] = reader.next_float()
+
+    params.setdefault("use_weights", 0)
+    return params
 
 
 def parse_log_history(reader):
@@ -218,10 +207,9 @@ def collect_union_edges(states):
 
 
 def build_layout_graph(num_vertices, states):
-    union_edges = collect_union_edges(states)
     graph = nx.Graph()
     graph.add_nodes_from(range(num_vertices))
-    graph.add_edges_from(union_edges)
+    graph.add_edges_from(collect_union_edges(states))
     return graph
 
 
@@ -263,13 +251,14 @@ class GraphViewer:
         self.timer.add_callback(self.on_timer)
         self.timer.start()
 
+        self.fig.canvas.mpl_connect("close_event", self.on_close)
+
     def draw_step(self, t):
         self.ax.clear()
         opinions, edges = self.states[t]
 
-        edge_list = list(edges.keys())
         nx.draw_networkx_edges(
-            self.layout_graph, self.pos, edgelist=edge_list, ax=self.ax, alpha=0.3
+            self.layout_graph, self.pos, edgelist=list(edges.keys()), ax=self.ax, alpha=0.3
         )
 
         colors = node_colors_for_step(self.num_vertices, opinions, self.stubborn)
@@ -277,10 +266,9 @@ class GraphViewer:
             self.layout_graph, self.pos, node_color=colors, ax=self.ax, node_size=120
         )
 
-        ones = sum(opinions)
         self.ax.set_title(
             f"Шаг {t} / {self.t_max}    "
-            f"мнение=1: {ones} из {self.num_vertices}    "
+            f"мнение=1: {sum(opinions)} из {self.num_vertices}    "
             f"рёбер: {len(edges)}"
         )
         self.ax.axis("off")
@@ -295,6 +283,10 @@ class GraphViewer:
         t = int(self.slider.val)
         next_t = 0 if t >= self.t_max else t + 1
         self.slider.set_val(next_t)
+
+    def on_close(self, event):
+        self.playing = False
+        self.timer.stop()
 
     def toggle_play(self, event):
         self.playing = not self.playing
@@ -335,13 +327,11 @@ def resolve_run_paths(run_dir):
     return initial_graph_path, log_path
 
 
-def check_files_exist(initial_graph_path, log_path):
-    if not os.path.isfile(initial_graph_path):
-        print(f"Не найден файл: {initial_graph_path}")
-        sys.exit(1)
-    if not os.path.isfile(log_path):
-        print(f"Не найден файл: {log_path}")
-        sys.exit(1)
+def check_files_exist(*paths):
+    for path in paths:
+        if not os.path.isfile(path):
+            print(f"Не найден файл: {path}")
+            sys.exit(1)
 
 
 def main():
@@ -349,8 +339,7 @@ def main():
         print("Использование: python visualize.py <путь_к_папке_прогона>")
         sys.exit(1)
 
-    run_dir = sys.argv[1]
-    initial_graph_path, log_path = resolve_run_paths(run_dir)
+    initial_graph_path, log_path = resolve_run_paths(sys.argv[1])
     check_files_exist(initial_graph_path, log_path)
 
     num_vertices, initial_edges, stubborn = parse_graph(initial_graph_path)

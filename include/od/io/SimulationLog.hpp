@@ -1,6 +1,7 @@
 #pragma once
 
 #include "od/model/EdgeEvolution.hpp"
+#include "od/model/ProbabilityFunction.hpp"
 
 #include <string>
 #include <vector>
@@ -24,13 +25,11 @@ struct SimulationLog {
     int tMax = 0;
     double k1 = 0.0;
     double k2 = 0.0;
-    bool dynamicEdges = false;
-    double p0 = 0.0;
-    double k = 0.0;
-    bool removeEdges = false;
-    double removeP0 = 0.0;
-    double removeK = 0.0;
     bool useWeights = false;
+    bool dynamicEdges = false;
+    od::model::ProbabilityFunction edgeAddFunction;
+    bool removeEdges = false;
+    od::model::ProbabilityFunction edgeRemoveFunction;
 
     std::string initialGraphFile;
     std::string finalGraphFile;

@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <iostream>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -148,27 +150,91 @@ static double readDoubleLoop(const std::string& prompt, double minVal, double ma
     }
 }
 
+static std::optional<std::vector<double>> parseDoubleCsv(const std::string& line){
+    std::vector<double> values;
+    std::stringstream ss(line);
+    std::string item;
+
+    while (std::getline(ss, item, ',')) {
+        item = od::io::trim(item);
+        if (item.empty()) continue;
+        try {
+            size_t pos = 0;
+            double value = std::stod(item, &pos);
+            if (pos != item.size()) return std::nullopt;
+            values.push_back(value);
+        } catch (...) {
+            return std::nullopt;
+        }
+    }
+    return values;
+}
+
+static od::model::FunctionKind chooseFunctionKind(const std::string& title){
+    std::vector<od::model::FunctionKind> kinds = od::model::allKinds();
+
+    std::cout << title << ":\n";
+    for (size_t i = 0; i < kinds.size(); ++i) {
+        std::cout << "  " << (i + 1) << " - " << od::model::kindDisplayName(kinds[i]) << "\n";
+    }
+
+    while (true) {
+        auto val = od::io::readIntInRange("Ввод: ", 1, static_cast<int>(kinds.size()));
+        if (val.has_value()) return kinds[static_cast<size_t>(*val - 1)];
+    }
+}
+
+static void printFunctionPreview(const od::model::ProbabilityFunction& function){
+    std::cout << "Проверка: p(0) = " << od::model::evaluate(function, 0)
+              << ", p(50) = " << od::model::evaluate(function, 50)
+              << ", p(100) = " << od::model::evaluate(function, 100)
+              << ", p(500) = " << od::model::evaluate(function, 500) << "\n";
+}
+
+od::model::ProbabilityFunction collectProbabilityFunction(const std::string& title){
+    od::model::ProbabilityFunction function;
+    function.kind = chooseFunctionKind(title);
+
+    std::string prompt = "Параметры (" + od::model::paramsDescription(function.kind) + ") через запятую: ";
+
+    while (true) {
+        std::cout << prompt;
+        std::string line;
+        std::getline(std::cin, line);
+
+        auto values = parseDoubleCsv(line);
+        if (!values.has_value()) {
+            std::cout << "Некорректные числа, повторите ввод\n";
+            continue;
+        }
+
+        function.params = *values;
+        std::string error = od::model::validateFunction(function);
+        if (!error.empty()) {
+            std::cout << error << "\n";
+            continue;
+        }
+        break;
+    }
+
+    printFunctionPreview(function);
+    return function;
+}
+
 void collectDynamicEdgesSettings(ManualGenConfig& cnf){
     cnf.dynamicEdges = od::io::readYesNo(
         "Нужна ли динамика рёбер (изменение вероятности связи со временем)? Введите y/n: ");
-
-    cnf.p0 = 0.0;
-    cnf.k = 0.0;
     cnf.removeEdges = false;
-    cnf.removeP0 = 0.0;
-    cnf.removeK = 0.0;
 
     if (!cnf.dynamicEdges){
         return;
     }
 
-    cnf.p0 = readDoubleLoop("Введите начальную вероятность добавления ребра (0.0..1.0): ", 0.0, 1.0);
-    cnf.k = readDoubleLoop("Введите коэффициент изменения для добавления (-5.0..5.0): ", -5.0, 5.0);
+    cnf.edgeAddFunction = collectProbabilityFunction("Функция вероятности ПОЯВЛЕНИЯ рёбер");
 
     cnf.removeEdges = od::io::readYesNo("Нужно ли удаление рёбер? Введите y/n: ");
     if (cnf.removeEdges) {
-        cnf.removeP0 = readDoubleLoop("Введите начальную вероятность удаления ребра (0.0..1.0): ", 0.0, 1.0);
-        cnf.removeK = readDoubleLoop("Введите коэффициент изменения для удаления (-5.0..5.0): ", -5.0, 5.0);
+        cnf.edgeRemoveFunction = collectProbabilityFunction("Функция вероятности ИСЧЕЗНОВЕНИЯ рёбер");
     }
 }
 
@@ -315,18 +381,16 @@ static ValidationResult validateDynamicEdges(const ManualGenConfig& config){
     if (!config.dynamicEdges){
         return {true, ""};
     }
-    if (config.p0 < 0.0 || config.p0 > 1.0){
-        return {false, "Начальная вероятность добавления p0 должна быть в диапазоне [0.0, 1.0]"};
+
+    std::string addError = od::model::validateFunction(config.edgeAddFunction);
+    if (!addError.empty()){
+        return {false, "Функция появления рёбер: " + addError};
     }
-    if (config.k < -5.0 || config.k > 5.0){
-        return {false, "Коэффициент добавления k должен быть в диапазоне [-5.0, 5.0]"};
-    }
+
     if (config.removeEdges){
-        if (config.removeP0 < 0.0 || config.removeP0 > 1.0){
-            return {false, "Начальная вероятность удаления removeP0 должна быть в диапазоне [0.0, 1.0]"};
-        }
-        if (config.removeK < -5.0 || config.removeK > 5.0){
-            return {false, "Коэффициент удаления removeK должен быть в диапазоне [-5.0, 5.0]"};
+        std::string removeError = od::model::validateFunction(config.edgeRemoveFunction);
+        if (!removeError.empty()){
+            return {false, "Функция исчезновения рёбер: " + removeError};
         }
     }
     return {true, ""};

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "od/graph/Graph.hpp"
+
 #include <random>
 #include <vector>
 
@@ -15,8 +16,6 @@ struct EdgeEvent {
     int v;
     double weight;
 };
-
-double linearProbability(double p0, double k, int t);
 
 void evolveEdges(
     Graph& graph,

@@ -5,11 +5,13 @@
 #include "od/io/SimulationLog.hpp"
 #include "od/model/DynamicsModel.hpp"
 #include "od/model/EdgeEvolution.hpp"
+#include "od/model/ProbabilityFunction.hpp"
 
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -60,11 +62,9 @@ struct RuntimeParams {
     double k2 = 1.0;
     bool useWeights = false;
     bool dynamicEdges = false;
-    double p0 = 0.0;
-    double k = 0.0;
+    od::model::ProbabilityFunction edgeAddFunction;
     bool removeEdges = false;
-    double removeP0 = 0.0;
-    double removeK = 0.0;
+    od::model::ProbabilityFunction edgeRemoveFunction;
     unsigned int seed = 0;
     bool seedSpecified = false;
     int tMax = 500;
@@ -75,11 +75,9 @@ void copyFileParams(RuntimeParams& rp, const od::io::SimulationParams& fileParam
     rp.k2 = fileParams.k2;
     rp.useWeights = fileParams.useWeights;
     rp.dynamicEdges = fileParams.dynamicEdges;
-    rp.p0 = fileParams.p0;
-    rp.k = fileParams.k;
+    rp.edgeAddFunction = fileParams.edgeAddFunction;
     rp.removeEdges = fileParams.removeEdges;
-    rp.removeP0 = fileParams.removeP0;
-    rp.removeK = fileParams.removeK;
+    rp.edgeRemoveFunction = fileParams.edgeRemoveFunction;
     rp.tMax = fileParams.tMax;
     rp.seed = fileParams.seed;
     rp.seedSpecified = true;
@@ -90,11 +88,9 @@ void copyConfigParams(RuntimeParams& rp, const od::config::ManualGenConfig& cnf)
     rp.k2 = cnf.k2;
     rp.useWeights = cnf.useWeights;
     rp.dynamicEdges = cnf.dynamicEdges;
-    rp.p0 = cnf.p0;
-    rp.k = cnf.k;
+    rp.edgeAddFunction = cnf.edgeAddFunction;
     rp.removeEdges = cnf.removeEdges;
-    rp.removeP0 = cnf.removeP0;
-    rp.removeK = cnf.removeK;
+    rp.edgeRemoveFunction = cnf.edgeRemoveFunction;
 }
 
 double readDoubleLoop(const std::string& prompt, double minVal, double maxVal) {
@@ -129,23 +125,33 @@ void collectTMaxSettings(RuntimeParams& rp) {
 
 void collectEdgeDynamicsStandalone(RuntimeParams& rp) {
     rp.dynamicEdges = od::io::readYesNo("Нужна ли динамика рёбер? Введите y/n: ");
-    rp.p0 = 0.0;
-    rp.k = 0.0;
     rp.removeEdges = false;
-    rp.removeP0 = 0.0;
-    rp.removeK = 0.0;
 
     if (!rp.dynamicEdges) {
         return;
     }
 
-    rp.p0 = readDoubleLoop("Введите начальную вероятность добавления p0 (0.0..1.0): ", 0.0, 1.0);
-    rp.k = readDoubleLoop("Введите коэффициент добавления k (-5.0..5.0): ", -5.0, 5.0);
+    rp.edgeAddFunction = od::config::collectProbabilityFunction("Функция вероятности ПОЯВЛЕНИЯ рёбер");
 
     rp.removeEdges = od::io::readYesNo("Нужно ли удаление рёбер? Введите y/n: ");
     if (rp.removeEdges) {
-        rp.removeP0 = readDoubleLoop("Введите начальную вероятность удаления removeP0 (0.0..1.0): ", 0.0, 1.0);
-        rp.removeK = readDoubleLoop("Введите коэффициент удаления removeK (-5.0..5.0): ", -5.0, 5.0);
+        rp.edgeRemoveFunction = od::config::collectProbabilityFunction("Функция вероятности ИСЧЕЗНОВЕНИЯ рёбер");
+    }
+}
+
+void printEdgeDynamics(const std::string& indent, bool dynamicEdges,
+                       const od::model::ProbabilityFunction& addFunction,
+                       bool removeEdges,
+                       const od::model::ProbabilityFunction& removeFunction) {
+    if (!dynamicEdges) {
+        std::cout << indent << "Динамика рёбер: выключена\n";
+        return;
+    }
+    std::cout << indent << "Появление рёбер: " << od::model::describeFunction(addFunction) << "\n";
+    if (removeEdges) {
+        std::cout << indent << "Исчезновение рёбер: " << od::model::describeFunction(removeFunction) << "\n";
+    } else {
+        std::cout << indent << "Исчезновение рёбер: выключено\n";
     }
 }
 
@@ -169,17 +175,8 @@ void printLoadedParams(const od::io::SimulationParams& fileParams) {
     std::cout << "  T_MAX = " << fileParams.tMax << "\n";
     std::cout << "  k1 = " << fileParams.k1 << ", k2 = " << fileParams.k2 << "\n";
     std::cout << "  веса: " << (fileParams.useWeights ? "учитываются" : "не учитываются") << "\n";
-    if (fileParams.dynamicEdges) {
-        std::cout << "  dynamicEdges: p0 = " << fileParams.p0 << ", k = " << fileParams.k << "\n";
-        if (fileParams.removeEdges) {
-            std::cout << "  removeEdges: removeP0 = " << fileParams.removeP0
-                      << ", removeK = " << fileParams.removeK << "\n";
-        } else {
-            std::cout << "  removeEdges: выключены\n";
-        }
-    } else {
-        std::cout << "  dynamicEdges: выключены\n";
-    }
+    printEdgeDynamics("  ", fileParams.dynamicEdges, fileParams.edgeAddFunction,
+                      fileParams.removeEdges, fileParams.edgeRemoveFunction);
 }
 
 std::pair<od::graph::Graph, RuntimeParams> generateInteractive() {
@@ -292,17 +289,21 @@ struct BatchArgs {
 
     bool dynamicEdges = false;
     bool dynamicEdges_set = false;
-    bool p0_set = false;
-    double p0 = 0.0;
-    bool k_add_set = false;
-    double k = 0.0;
+    std::string addFuncName;
+    std::string addParams;
+    bool addLegacyA_set = false;
+    double addLegacyA = 0.0;
+    bool addLegacyB_set = false;
+    double addLegacyB = 0.0;
 
     bool removeEdges = false;
     bool removeEdges_set = false;
-    bool removeP0_set = false;
-    double removeP0 = 0.0;
-    bool removeK_set = false;
-    double removeK = 0.0;
+    std::string removeFuncName;
+    std::string removeParams;
+    bool removeLegacyA_set = false;
+    double removeLegacyA = 0.0;
+    bool removeLegacyB_set = false;
+    double removeLegacyB = 0.0;
 };
 
 void printBatchUsage() {
@@ -319,8 +320,14 @@ void printBatchUsage() {
     std::cout << "  --use-weights | --no-weights\n";
     std::cout << "  --stubborn-attach N [--stubborn-attach-mode random|manual] [--stubborn-attach-targets 0,2,4]\n";
     std::cout << "  --stubborn-assign N [--stubborn-assign-mode random|manual] [--stubborn-assign-targets 1,3,5]\n";
-    std::cout << "  --dynamic-edges --p0 X --k Y\n";
-    std::cout << "  --remove-edges --remove-p0 X --remove-k Y\n";
+    std::cout << "  --dynamic-edges --add-func NAME --add-params \"a,b,...\"\n";
+    std::cout << "  --remove-edges --remove-func NAME --remove-params \"a,b,...\"\n";
+    std::cout << "  (устаревшее: --p0 X --k Y и --remove-p0 X --remove-k Y задают линейную функцию)\n\n";
+    std::cout << "Функции:\n";
+    for (od::model::FunctionKind kind : od::model::allKinds()) {
+        std::cout << "  " << od::model::kindToString(kind) << " (" << od::model::paramsDescription(kind)
+                  << ") - " << od::model::kindDisplayName(kind) << "\n";
+    }
 }
 
 std::string nextArgValue(int argc, char** argv, int& i, const std::string& flag) {
@@ -434,21 +441,29 @@ bool parseEdgeDynamicsFlag(const std::string& flag, int argc, char** argv, int& 
     if (flag == "--dynamic-edges") {
         args.dynamicEdges = true;
         args.dynamicEdges_set = true;
+    } else if (flag == "--add-func") {
+        args.addFuncName = nextArgValue(argc, argv, i, flag);
+    } else if (flag == "--add-params") {
+        args.addParams = nextArgValue(argc, argv, i, flag);
     } else if (flag == "--p0") {
-        args.p0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-        args.p0_set = true;
+        args.addLegacyA = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.addLegacyA_set = true;
     } else if (flag == "--k") {
-        args.k = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-        args.k_add_set = true;
+        args.addLegacyB = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.addLegacyB_set = true;
     } else if (flag == "--remove-edges") {
         args.removeEdges = true;
         args.removeEdges_set = true;
+    } else if (flag == "--remove-func") {
+        args.removeFuncName = nextArgValue(argc, argv, i, flag);
+    } else if (flag == "--remove-params") {
+        args.removeParams = nextArgValue(argc, argv, i, flag);
     } else if (flag == "--remove-p0") {
-        args.removeP0 = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-        args.removeP0_set = true;
+        args.removeLegacyA = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.removeLegacyA_set = true;
     } else if (flag == "--remove-k") {
-        args.removeK = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
-        args.removeK_set = true;
+        args.removeLegacyB = parseDoubleArg(nextArgValue(argc, argv, i, flag), flag);
+        args.removeLegacyB_set = true;
     } else {
         return false;
     }
@@ -546,6 +561,63 @@ od::config::StubbornGroup buildStubbornGroup(int count, const std::string& mode,
     return group;
 }
 
+std::optional<od::model::ProbabilityFunction> buildBatchFunction(
+    const std::string& name,
+    const std::string& paramsCsv,
+    bool legacyASet, double legacyA,
+    bool legacyBSet, double legacyB,
+    const std::string& prefix
+) {
+    const std::string funcFlag = "--" + prefix + "-func";
+    const std::string paramsFlag = "--" + prefix + "-params";
+
+    if (!name.empty()) {
+        auto kind = od::model::kindFromString(name);
+        if (!kind.has_value()) {
+            std::cout << "Ошибка: неизвестная функция в " << funcFlag << ": " << name << "\n";
+            printBatchUsage();
+            std::exit(1);
+        }
+
+        od::model::ProbabilityFunction function;
+        function.kind = *kind;
+        function.params = parseDoubleList(paramsCsv, paramsFlag);
+
+        std::string error = od::model::validateFunction(function);
+        if (!error.empty()) {
+            std::cout << "Ошибка в " << paramsFlag << ": " << error << "\n";
+            std::exit(1);
+        }
+        return function;
+    }
+
+    if (!paramsCsv.empty()) {
+        std::cout << "Ошибка: " << paramsFlag << " задан без " << funcFlag << "\n";
+        std::exit(1);
+    }
+
+    if (legacyASet || legacyBSet) {
+        od::model::ProbabilityFunction function;
+        function.kind = od::model::FunctionKind::Linear;
+        function.params = {legacyA, legacyB};
+        return function;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<od::model::ProbabilityFunction> buildAddFunction(const BatchArgs& args) {
+    return buildBatchFunction(args.addFuncName, args.addParams,
+                              args.addLegacyA_set, args.addLegacyA,
+                              args.addLegacyB_set, args.addLegacyB, "add");
+}
+
+std::optional<od::model::ProbabilityFunction> buildRemoveFunction(const BatchArgs& args) {
+    return buildBatchFunction(args.removeFuncName, args.removeParams,
+                              args.removeLegacyA_set, args.removeLegacyA,
+                              args.removeLegacyB_set, args.removeLegacyB, "remove");
+}
+
 od::config::ManualGenConfig buildConfigFromBatchArgs(const BatchArgs& args) {
     od::config::ManualGenConfig cnf;
     cnf.cntLevels = static_cast<int>(args.levelVertices.size());
@@ -561,12 +633,26 @@ od::config::ManualGenConfig buildConfigFromBatchArgs(const BatchArgs& args) {
         args.attachCount, args.attachMode, args.attachTargets, "--stubborn-attach-targets");
     cnf.generateStubborn = cnf.stubbornAssign.count > 0 || cnf.stubbornAttach.count > 0;
 
+    std::optional<od::model::ProbabilityFunction> addFunction = buildAddFunction(args);
+    std::optional<od::model::ProbabilityFunction> removeFunction = buildRemoveFunction(args);
+
     cnf.dynamicEdges = args.dynamicEdges;
-    cnf.p0 = args.p0;
-    cnf.k = args.k;
+    if (cnf.dynamicEdges) {
+        if (!addFunction.has_value()) {
+            std::cout << "Ошибка: --dynamic-edges требует --add-func и --add-params\n";
+            std::exit(1);
+        }
+        cnf.edgeAddFunction = *addFunction;
+    }
+
     cnf.removeEdges = args.removeEdges;
-    cnf.removeP0 = args.removeP0;
-    cnf.removeK = args.removeK;
+    if (cnf.removeEdges) {
+        if (!removeFunction.has_value()) {
+            std::cout << "Ошибка: --remove-edges требует --remove-func и --remove-params\n";
+            std::exit(1);
+        }
+        cnf.edgeRemoveFunction = *removeFunction;
+    }
 
     cnf.k1 = args.k1;
     cnf.k2 = args.k2;
@@ -605,11 +691,13 @@ void applyBatchOverrides(RuntimeParams& rp, const BatchArgs& args) {
     }
     if (args.useWeights_set) rp.useWeights = args.useWeights;
     if (args.dynamicEdges_set) rp.dynamicEdges = args.dynamicEdges;
-    if (args.p0_set) rp.p0 = args.p0;
-    if (args.k_add_set) rp.k = args.k;
     if (args.removeEdges_set) rp.removeEdges = args.removeEdges;
-    if (args.removeP0_set) rp.removeP0 = args.removeP0;
-    if (args.removeK_set) rp.removeK = args.removeK;
+
+    std::optional<od::model::ProbabilityFunction> addFunction = buildAddFunction(args);
+    if (addFunction.has_value()) rp.edgeAddFunction = *addFunction;
+
+    std::optional<od::model::ProbabilityFunction> removeFunction = buildRemoveFunction(args);
+    if (removeFunction.has_value()) rp.edgeRemoveFunction = *removeFunction;
 }
 
 std::pair<od::graph::Graph, RuntimeParams> loadBatch(const BatchArgs& args) {
@@ -655,11 +743,9 @@ od::io::SimulationParams buildFileParams(const RuntimeParams& rp, unsigned int s
     params.k2 = rp.k2;
     params.useWeights = rp.useWeights;
     params.dynamicEdges = rp.dynamicEdges;
-    params.p0 = rp.p0;
-    params.k = rp.k;
+    params.edgeAddFunction = rp.edgeAddFunction;
     params.removeEdges = rp.removeEdges;
-    params.removeP0 = rp.removeP0;
-    params.removeK = rp.removeK;
+    params.edgeRemoveFunction = rp.edgeRemoveFunction;
     return params;
 }
 
@@ -673,11 +759,9 @@ od::io::SimulationLog buildLog(const RuntimeParams& rp, unsigned int seed,
     log.k2 = rp.k2;
     log.useWeights = rp.useWeights;
     log.dynamicEdges = rp.dynamicEdges;
-    log.p0 = rp.p0;
-    log.k = rp.k;
+    log.edgeAddFunction = rp.edgeAddFunction;
     log.removeEdges = rp.removeEdges;
-    log.removeP0 = rp.removeP0;
-    log.removeK = rp.removeK;
+    log.edgeRemoveFunction = rp.edgeRemoveFunction;
     log.initialGraphFile = initialGraphFile;
     log.finalGraphFile = finalGraphFile;
     log.history.reserve(static_cast<size_t>(rp.tMax));
@@ -691,17 +775,8 @@ void printSimulationParams(const RuntimeParams& rp, unsigned int seed, const std
     std::cout << "T_MAX = " << rp.tMax << "\n";
     std::cout << "k1 = " << rp.k1 << ", k2 = " << rp.k2 << "\n";
     std::cout << "Веса рёбер: " << (rp.useWeights ? "учитываются" : "не учитываются") << "\n";
-    if (rp.dynamicEdges) {
-        std::cout << "dynamicEdges: p0 = " << rp.p0 << ", k = " << rp.k << "\n";
-        if (rp.removeEdges) {
-            std::cout << "removeEdges: removeP0 = " << rp.removeP0
-                      << ", removeK = " << rp.removeK << "\n";
-        } else {
-            std::cout << "removeEdges: выключены\n";
-        }
-    } else {
-        std::cout << "dynamicEdges: выключены\n";
-    }
+    printEdgeDynamics("", rp.dynamicEdges, rp.edgeAddFunction,
+                      rp.removeEdges, rp.edgeRemoveFunction);
 }
 
 void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions,
@@ -710,9 +785,9 @@ void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions,
     int stepNumber = t + 1;
 
     if (rp.dynamicEdges) {
-        double addP = od::model::linearProbability(rp.p0, rp.k, t);
+        double addP = od::model::evaluate(rp.edgeAddFunction, t);
         double removeP = rp.removeEdges
-            ? od::model::linearProbability(rp.removeP0, rp.removeK, t)
+            ? od::model::evaluate(rp.edgeRemoveFunction, t)
             : 0.0;
         od::model::evolveEdges(graph, addP, removeP, rng, stepNumber, log.edgeEvents);
     }

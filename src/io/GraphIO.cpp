@@ -1,11 +1,47 @@
 #include "od/io/GraphIO.hpp"
 
 #include <fstream>
+#include <iomanip>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace od::io {
+
+void writeFunction(std::ostream& out, const od::model::ProbabilityFunction& function) {
+    out << od::model::kindToString(function.kind) << " " << function.params.size();
+    for (double value : function.params) {
+        out << " " << std::setprecision(15) << value;
+    }
+}
+
+od::model::ProbabilityFunction readFunction(std::istream& in, const std::string& source) {
+    std::string name;
+    int count = 0;
+    if (!(in >> name >> count) || count < 0) {
+        throw std::runtime_error("Не удалось прочитать функцию в " + source);
+    }
+
+    auto kind = od::model::kindFromString(name);
+    if (!kind.has_value()) {
+        throw std::runtime_error("Неизвестная функция '" + name + "' в " + source);
+    }
+
+    od::model::ProbabilityFunction function;
+    function.kind = *kind;
+    function.params.assign(static_cast<size_t>(count), 0.0);
+    for (int i = 0; i < count; ++i) {
+        if (!(in >> function.params[static_cast<size_t>(i)])) {
+            throw std::runtime_error("Не удалось прочитать параметры функции в " + source);
+        }
+    }
+
+    std::string error = od::model::validateFunction(function);
+    if (!error.empty()) {
+        throw std::runtime_error(error + " (" + source + ")");
+    }
+    return function;
+}
 
 void saveGraph(const od::graph::Graph& graph, const std::string& filename) {
     std::ofstream file(filename);
@@ -67,6 +103,92 @@ void expectToken(std::ifstream& file, const std::string& expected, const std::st
     }
 }
 
+int readCount(std::ifstream& file, const std::string& what, const std::string& filename) {
+    int value = 0;
+    if (!(file >> value)) {
+        throw std::runtime_error("loadGraph: не удалось прочитать " + what + " из " + filename);
+    }
+    if (value < 0) {
+        throw std::runtime_error("loadGraph: " + what + " отрицательное в " + filename);
+    }
+    return value;
+}
+
+struct LegacyLinear {
+    bool hasA = false;
+    bool hasB = false;
+    double a = 0.0;
+    double b = 0.0;
+
+    bool present() const {
+        return hasA || hasB;
+    }
+
+    od::model::ProbabilityFunction toFunction() const {
+        od::model::ProbabilityFunction function;
+        function.kind = od::model::FunctionKind::Linear;
+        function.params = {a, b};
+        return function;
+    }
+};
+
+void readParamsSection(std::ifstream& file, SimulationParams& params, const std::string& filename) {
+    bool hasAddFunction = false;
+    bool hasRemoveFunction = false;
+    LegacyLinear legacyAdd;
+    LegacyLinear legacyRemove;
+
+    std::string token;
+    while (file >> token) {
+        if (token == "SEED") {
+            file >> params.seed;
+        } else if (token == "T_MAX") {
+            file >> params.tMax;
+        } else if (token == "K1") {
+            file >> params.k1;
+        } else if (token == "K2") {
+            file >> params.k2;
+        } else if (token == "USE_WEIGHTS") {
+            int v = 0;
+            file >> v;
+            params.useWeights = (v != 0);
+        } else if (token == "DYNAMIC_EDGES") {
+            int v = 0;
+            file >> v;
+            params.dynamicEdges = (v != 0);
+        } else if (token == "REMOVE_EDGES") {
+            int v = 0;
+            file >> v;
+            params.removeEdges = (v != 0);
+        } else if (token == "ADD_FUNCTION") {
+            params.edgeAddFunction = readFunction(file, filename);
+            hasAddFunction = true;
+        } else if (token == "REMOVE_FUNCTION") {
+            params.edgeRemoveFunction = readFunction(file, filename);
+            hasRemoveFunction = true;
+        } else if (token == "P0") {
+            file >> legacyAdd.a;
+            legacyAdd.hasA = true;
+        } else if (token == "K") {
+            file >> legacyAdd.b;
+            legacyAdd.hasB = true;
+        } else if (token == "REMOVE_P0") {
+            file >> legacyRemove.a;
+            legacyRemove.hasA = true;
+        } else if (token == "REMOVE_K") {
+            file >> legacyRemove.b;
+            legacyRemove.hasB = true;
+        }
+    }
+
+    if (!hasAddFunction && legacyAdd.present()) {
+        params.edgeAddFunction = legacyAdd.toFunction();
+    }
+    if (!hasRemoveFunction && legacyRemove.present()) {
+        params.edgeRemoveFunction = legacyRemove.toFunction();
+    }
+}
+
 } // namespace
 
 od::graph::Graph loadGraph(const std::string& filename) {
@@ -76,22 +198,13 @@ od::graph::Graph loadGraph(const std::string& filename) {
     }
 
     expectToken(file, "VERTICES", filename);
-    int numVertices = 0;
-    if (!(file >> numVertices)) {
-        throw std::runtime_error("loadGraph: не удалось прочитать количество вершин из " + filename);
-    }
-    if (numVertices < 0) {
-        throw std::runtime_error("loadGraph: количество вершин отрицательное в " + filename);
-    }
+    int numVertices = readCount(file, "количество вершин", filename);
 
     od::graph::Graph graph(numVertices);
 
     expectToken(file, "STUBBORN", filename);
-    int stubbornCount = 0;
-    if (!(file >> stubbornCount)) {
-        throw std::runtime_error("loadGraph: не удалось прочитать количество упрямых вершин из " + filename);
-    }
-    if (stubbornCount < 0 || stubbornCount > numVertices) {
+    int stubbornCount = readCount(file, "количество упрямых вершин", filename);
+    if (stubbornCount > numVertices) {
         throw std::runtime_error("loadGraph: некорректное количество упрямых вершин в " + filename);
     }
 
@@ -107,13 +220,7 @@ od::graph::Graph loadGraph(const std::string& filename) {
     }
 
     expectToken(file, "EDGES", filename);
-    int edgeCount = 0;
-    if (!(file >> edgeCount)) {
-        throw std::runtime_error("loadGraph: не удалось прочитать количество рёбер из " + filename);
-    }
-    if (edgeCount < 0) {
-        throw std::runtime_error("loadGraph: количество рёбер отрицательное в " + filename);
-    }
+    int edgeCount = readCount(file, "количество рёбер", filename);
 
     for (int i = 0; i < edgeCount; ++i) {
         int from = 0;
@@ -147,15 +254,17 @@ void saveGraphWithParams(
     file << "PARAMS\n";
     file << "SEED " << params.seed << "\n";
     file << "T_MAX " << params.tMax << "\n";
-    file << "K1 " << params.k1 << "\n";
-    file << "K2 " << params.k2 << "\n";
-    file << "DYNAMIC_EDGES " << (params.dynamicEdges ? 1 : 0) << "\n";
-    file << "P0 " << params.p0 << "\n";
-    file << "K " << params.k << "\n";
-    file << "REMOVE_EDGES " << (params.removeEdges ? 1 : 0) << "\n";
-    file << "REMOVE_P0 " << params.removeP0 << "\n";
-    file << "REMOVE_K " << params.removeK << "\n";
+    file << "K1 " << std::setprecision(15) << params.k1 << "\n";
+    file << "K2 " << std::setprecision(15) << params.k2 << "\n";
     file << "USE_WEIGHTS " << (params.useWeights ? 1 : 0) << "\n";
+    file << "DYNAMIC_EDGES " << (params.dynamicEdges ? 1 : 0) << "\n";
+    file << "ADD_FUNCTION ";
+    writeFunction(file, params.edgeAddFunction);
+    file << "\n";
+    file << "REMOVE_EDGES " << (params.removeEdges ? 1 : 0) << "\n";
+    file << "REMOVE_FUNCTION ";
+    writeFunction(file, params.edgeRemoveFunction);
+    file << "\n";
 
     if (!file.good()) {
         throw std::runtime_error("saveGraphWithParams: ошибка при записи PARAMS в " + filename);
@@ -184,40 +293,8 @@ od::graph::Graph loadGraphWithParams(
         }
     }
 
-    if (!paramsLoaded) {
-        return graph;
-    }
-
-    while (file >> token) {
-        if (token == "SEED") {
-            file >> params.seed;
-        } else if (token == "T_MAX") {
-            file >> params.tMax;
-        } else if (token == "K1") {
-            file >> params.k1;
-        } else if (token == "K2") {
-            file >> params.k2;
-        } else if (token == "DYNAMIC_EDGES") {
-            int v = 0;
-            file >> v;
-            params.dynamicEdges = (v != 0);
-        } else if (token == "P0") {
-            file >> params.p0;
-        } else if (token == "K") {
-            file >> params.k;
-        } else if (token == "REMOVE_EDGES") {
-            int v = 0;
-            file >> v;
-            params.removeEdges = (v != 0);
-        } else if (token == "REMOVE_P0") {
-            file >> params.removeP0;
-        } else if (token == "REMOVE_K") {
-            file >> params.removeK;
-        } else if (token == "USE_WEIGHTS") {
-            int v = 0;
-            file >> v;
-            params.useWeights = (v != 0);
-        }
+    if (paramsLoaded) {
+        readParamsSection(file, params, filename);
     }
 
     return graph;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "od/model/ProbabilityFunction.hpp"
+
 #include <string>
 #include <vector>
 
@@ -25,12 +27,10 @@ struct ManualGenConfig {
     StubbornGroup stubbornAttach;
 
     bool dynamicEdges = false;
-    double p0 = 0.0;
-    double k = 0.0;
+    od::model::ProbabilityFunction edgeAddFunction;
 
     bool removeEdges = false;
-    double removeP0 = 0.0;
-    double removeK = 0.0;
+    od::model::ProbabilityFunction edgeRemoveFunction;
 
     double k1 = 0.0;
     double k2 = 1.0;
@@ -53,6 +53,8 @@ void collectLevels(ManualGenConfig& cnf);
 void collectStubbornSettings(ManualGenConfig& cnf);
 void collectDynamicEdgesSettings(ManualGenConfig& cnf);
 void collectOpinionModelSettings(ManualGenConfig& cnf);
+
+od::model::ProbabilityFunction collectProbabilityFunction(const std::string& title);
 
 ManualGenConfig collectManualGenConfig();
 ManualGenConfig collectGeneralGenConfig();
