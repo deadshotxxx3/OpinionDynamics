@@ -3,6 +3,7 @@
 
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <stdexcept>
 
 namespace od::io {
@@ -46,6 +47,7 @@ void writeOpinionChanges(std::ofstream& file, const SimulationLog& log) {
 
 void writeEdgeEvents(std::ofstream& file, const SimulationLog& log) {
     file << "EDGE_EVENTS " << log.edgeEvents.size() << "\n";
+    file << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto& ev : log.edgeEvents) {
         file << ev.step << " "
              << (ev.added ? "ADD" : "REMOVE") << " "

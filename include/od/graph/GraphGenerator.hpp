@@ -3,17 +3,33 @@
 #include "od/config/ManualGenConfig.hpp"
 #include "od/graph/Graph.hpp"
 
-#include <random>
-#include <vector>
-
 namespace od::graph {
 
-Graph generateManualGraph(const od::config::ManualGenConfig& config);
-
-void assignStubbornVertices(
-    Graph& graph,
-    const od::config::StubbornGroup& assignGroup,
-    const od::config::StubbornGroup& attachGroup,
-    std::mt19937& rng);
+/**
+ * @brief Строит случайный многоуровневый граф и расставляет упрямые вершины.
+ *
+ * Вершины уровней нумеруются подряд: сначала все вершины первого уровня, затем второго и т. д.
+ * Ребро внутри уровня `i` появляется с вероятностью `pᵢ`, между уровнями `i` и `j` —
+ * с вероятностью `min(pᵢ, pⱼ)`. Вес каждого ребра случаен и равномерен на `[0, 1)`.
+ *
+ * Упрямые вершины расставляются после рёбер:
+ * 1. группа `stubbornAssign` отмечает упрямыми уже существующие вершины (без повторов);
+ * 2. группа `stubbornAttach` добавляет новые вершины в конец графа, каждая соединена
+ *    одним ребром со своей целью среди вершин уровней (цели могут повторяться).
+ *
+ * Результат полностью определяется конфигурацией и `seed`: одинаковые входные данные
+ * всегда дают одинаковый граф. Генератор использует собственный поток случайных чисел,
+ * не совпадающий с `std::mt19937(seed)`, поэтому симуляция с тем же `seed` не повторяет
+ * случайные числа генерации.
+ *
+ * @param config Уровни и группы упрямых вершин. Остальные поля не используются.
+ *        Конфигурация должна пройти `od::config::validateConfig`.
+ * @param seed Seed генератора случайных чисел.
+ * @return Построенный граф.
+ * @throws std::invalid_argument Если в группе упрямых число целей не совпадает с количеством
+ *         или назначаемых упрямых больше, чем вершин в уровнях.
+ * @throws std::out_of_range Если номер цели упрямой вершины вне вершин уровней.
+ */
+Graph generateGraph(const od::config::ManualGenConfig& config, unsigned int seed);
 
 } // namespace od::graph

@@ -1,7 +1,9 @@
 #include "od/io/GraphIO.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -79,7 +81,12 @@ void saveGraph(const od::graph::Graph& graph, const std::string& filename) {
         }
     }
 
+    std::sort(edges.begin(), edges.end(), [](const EdgeRecord& a, const EdgeRecord& b) {
+        return a.from != b.from ? a.from < b.from : a.to < b.to;
+    });
+
     file << "EDGES " << edges.size() << "\n";
+    file << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const auto& e : edges) {
         file << e.from << " " << e.to << " " << e.weight << "\n";
     }

@@ -291,7 +291,7 @@ class SimulationForm:
         self.build_function_group(
             frame, "add", "Появление рёбер", self.dynamic_edges_var, default_name="linear")
         self.build_function_group(
-            frame, "remove", "Удаление рёбер", self.remove_edges_var, default_name="constant")
+            frame, "remove", "Исчезновение рёбер", self.remove_edges_var, default_name="constant")
 
         self.dynamic_frame = frame
 
@@ -502,11 +502,6 @@ class SimulationForm:
             self.show_visualization(run_dir)
 
     def detect_run_dir(self, project_root, seed, stdout):
-        if seed is not None:
-            candidate = os.path.join(project_root, "runs", f"run_{seed}")
-            if os.path.isdir(candidate):
-                return candidate
-
         for line in stdout.splitlines():
             line = line.strip()
             if line.startswith("Папка прогона:"):
@@ -515,6 +510,11 @@ class SimulationForm:
                     path = os.path.join(project_root, path)
                 if os.path.isdir(path):
                     return os.path.abspath(path)
+
+        if seed is not None:
+            candidate = os.path.join(project_root, "runs", f"run_{seed}")
+            if os.path.isdir(candidate):
+                return candidate
 
         runs_dir = os.path.join(project_root, "runs")
         if os.path.isdir(runs_dir):
@@ -570,7 +570,7 @@ class SimulationForm:
         args = ["--dynamic-edges", "--add-func", name, "--add-params", params]
 
         if self.remove_edges_var.get():
-            name, params = self.parse_function_params("remove", "Удаление рёбер")
+            name, params = self.parse_function_params("remove", "Исчезновение рёбер")
             args += ["--remove-edges", "--remove-func", name, "--remove-params", params]
 
         return args

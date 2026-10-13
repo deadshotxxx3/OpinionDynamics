@@ -104,6 +104,13 @@ void collectSeedSettings(RuntimeParams& rp) {
     }
 }
 
+void ensureSeed(RuntimeParams& rp) {
+    if (!rp.seedSpecified) {
+        rp.seed = std::random_device{}();
+        rp.seedSpecified = true;
+    }
+}
+
 void collectTMaxSettings(RuntimeParams& rp) {
     while (true) {
         auto val = od::io::readIntInRange("Введите количество шагов симуляции (1..100000): ", 1, 100000);
@@ -182,12 +189,13 @@ std::pair<od::graph::Graph, RuntimeParams> generateInteractive() {
     }
     std::cout << "Конфиг корректен.\n\n";
 
-    od::graph::Graph graph = od::graph::generateManualGraph(cnf);
-
     RuntimeParams rp;
     copyConfigParams(rp, cnf);
     collectTMaxSettings(rp);
     collectSeedSettings(rp);
+    ensureSeed(rp);
+
+    od::graph::Graph graph = od::graph::generateGraph(cnf, rp.seed);
 
     return {std::move(graph), rp};
 }
@@ -660,13 +668,14 @@ std::pair<od::graph::Graph, RuntimeParams> generateBatch(const BatchArgs& args) 
         std::exit(1);
     }
 
-    od::graph::Graph graph = od::graph::generateManualGraph(cnf);
-
     RuntimeParams rp;
     copyConfigParams(rp, cnf);
     rp.tMax = args.tMax;
     rp.seed = args.seed;
     rp.seedSpecified = args.seed_set;
+    ensureSeed(rp);
+
+    od::graph::Graph graph = od::graph::generateGraph(cnf, rp.seed);
 
     return {std::move(graph), rp};
 }
@@ -822,14 +831,24 @@ void saveResults(const od::graph::Graph& graph, const od::io::SimulationLog& log
     }
 }
 
+std::string createRunDir(unsigned int seed) {
+    const std::string base = "runs/run_" + std::to_string(seed);
+    std::string runDir = base;
+    for (int copy = 2; std::filesystem::exists(runDir); ++copy) {
+        runDir = base + "_" + std::to_string(copy);
+    }
+    std::filesystem::create_directories(runDir);
+    return runDir;
+}
+
 void runSimulation(od::graph::Graph graph, RuntimeParams rp) {
     GraphStats stats = computeStats(graph);
     printStats("Статистика графа", stats);
 
-    unsigned int seed = rp.seedSpecified ? rp.seed : std::random_device{}();
+    ensureSeed(rp);
+    unsigned int seed = rp.seed;
 
-    std::string runDir = "runs/run_" + std::to_string(seed);
-    std::filesystem::create_directories(runDir);
+    const std::string runDir = createRunDir(seed);
 
     const std::string initialGraphFile = runDir + "/graph_initial.txt";
     const std::string finalGraphFile   = runDir + "/graph_final.txt";
