@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -143,33 +142,6 @@ void collectStubbornSettings(ManualGenConfig& cnf){
     }
 }
 
-static double readDoubleLoop(const std::string& prompt, double minVal, double maxVal){
-    while (true) {
-        auto val = od::io::readDoubleInRange(prompt, minVal, maxVal);
-        if (val.has_value()) return *val;
-    }
-}
-
-static std::optional<std::vector<double>> parseDoubleCsv(const std::string& line){
-    std::vector<double> values;
-    std::stringstream ss(line);
-    std::string item;
-
-    while (std::getline(ss, item, ',')) {
-        item = od::io::trim(item);
-        if (item.empty()) continue;
-        try {
-            size_t pos = 0;
-            double value = std::stod(item, &pos);
-            if (pos != item.size()) return std::nullopt;
-            values.push_back(value);
-        } catch (...) {
-            return std::nullopt;
-        }
-    }
-    return values;
-}
-
 static od::model::FunctionKind chooseFunctionKind(const std::string& title){
     std::vector<od::model::FunctionKind> kinds = od::model::allKinds();
 
@@ -198,11 +170,7 @@ od::model::ProbabilityFunction collectProbabilityFunction(const std::string& tit
     std::string prompt = "Параметры (" + od::model::paramsDescription(function.kind) + ") через запятую: ";
 
     while (true) {
-        std::cout << prompt;
-        std::string line;
-        std::getline(std::cin, line);
-
-        auto values = parseDoubleCsv(line);
+        auto values = od::io::parseDoubleList(od::io::readLine(prompt));
         if (!values.has_value()) {
             std::cout << "Некорректные числа, повторите ввод\n";
             continue;
@@ -239,8 +207,18 @@ void collectDynamicEdgesSettings(ManualGenConfig& cnf){
 }
 
 void collectOpinionModelSettings(ManualGenConfig& cnf){
-    cnf.k1 = readDoubleLoop("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
-    cnf.k2 = readDoubleLoop("Введите порог k2 (" + std::to_string(cnf.k1) + "..1.0): ", cnf.k1, 1.0);
+    cnf.k1 = od::io::readDoubleUntilValid("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+    while (cnf.k1 >= 1.0) {
+        std::cout << "k1 должен быть меньше 1, иначе нельзя выбрать k2 > k1\n";
+        cnf.k1 = od::io::readDoubleUntilValid("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+    }
+
+    const std::string k2Prompt = "Введите порог k2 (больше " + std::to_string(cnf.k1) + ", до 1.0): ";
+    cnf.k2 = od::io::readDoubleUntilValid(k2Prompt, cnf.k1, 1.0);
+    while (cnf.k2 <= cnf.k1) {
+        std::cout << "k2 должен быть строго больше k1\n";
+        cnf.k2 = od::io::readDoubleUntilValid(k2Prompt, cnf.k1, 1.0);
+    }
     cnf.useWeights = od::io::readYesNo(
         "Учитывать веса рёбер при изменении мнения? Введите y/n: ");
 }
@@ -279,7 +257,7 @@ ManualGenConfig collectGeneralGenConfig(){
         break;
     }
 
-    double probability = readDoubleLoop("Введите вероятность появления ребра (0.0..1.0): ", 0.0, 1.0);
+    double probability = od::io::readDoubleUntilValid("Введите вероятность появления ребра (0.0..1.0): ", 0.0, 1.0);
 
     cnf.components.assign(static_cast<size_t>(cnf.cntLevels), LevelConfig{verticesPerLevel, probability});
 

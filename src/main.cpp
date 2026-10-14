@@ -893,13 +893,18 @@ bool hasBatchFlag(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
-    if (hasBatchFlag(argc, argv)) {
-        BatchArgs args = parseBatchArgs(argc, argv);
-        auto [graph, rp] = setupGraphAndParamsBatch(args);
-        runSimulation(std::move(graph), rp);
-    } else {
-        auto [graph, rp] = setupGraphAndParamsInteractive();
-        runSimulation(std::move(graph), rp);
+    try {
+        if (hasBatchFlag(argc, argv)) {
+            BatchArgs args = parseBatchArgs(argc, argv);
+            auto [graph, rp] = setupGraphAndParamsBatch(args);
+            runSimulation(std::move(graph), rp);
+        } else {
+            auto [graph, rp] = setupGraphAndParamsInteractive();
+            runSimulation(std::move(graph), rp);
+        }
+    } catch (const std::exception& e) {
+        std::cout << "Ошибка: " << e.what() << "\n";
+        return 1;
     }
 
     return 0;
