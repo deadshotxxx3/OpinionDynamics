@@ -112,17 +112,22 @@ f(s) = 1                    если s > k2
 CMakeLists.txt
 requirements.txt                   Python-зависимости для визуализации и формы
 include/od/
+    config/BatchArgs.hpp           разбор флагов командной строки
+    config/BatchMode.hpp           подготовка запуска по флагам: генерация или загрузка
+    config/InteractiveMode.hpp     подготовка запуска через вопросы в консоли
     config/ManualGenConfig.hpp     конфигурация генерации, сбор параметров, валидация
+    config/RuntimeParams.hpp       параметры прогона, перевод из конфига и файла, проверка
     graph/Graph.hpp                класс графа: списки смежности с весами, упрямые вершины
     graph/GraphGenerator.hpp       генерация многоуровневого графа и упрямых вершин
-    io/InputHelpers.hpp            чтение чисел и y/n с проверками
+    io/InputHelpers.hpp            разбор чисел и списков, чтение ввода с проверками
     io/GraphIO.hpp                 сохранение/загрузка графа и секции PARAMS
     io/SimulationLog.hpp           запись лога симуляции
     model/DynamicsModel.hpp        модель мнений: initOpinions, stepOpinions
     model/EdgeEvolution.hpp        появление и исчезновение рёбер за шаг
     model/ProbabilityFunction.hpp  функции вероятности p(t)
+    model/Simulation.hpp           цикл симуляции, папка прогона, сохранение результатов
 src/
-    main.cpp                       точка входа: интерактивный и batch-режимы, цикл симуляции
+    main.cpp                       точка входа: выбор режима и обработка ошибок
     config/ graph/ io/ model/      реализации модулей
 visualization/
     run_simulation.py              форма запуска (tkinter)
