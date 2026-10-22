@@ -12,7 +12,7 @@ import networkx as nx
 MAX_VISUAL_VERTICES = 100
 
 INT_PARAM_KEYS = {"SEED", "T_MAX", "USE_WEIGHTS", "DYNAMIC_EDGES", "REMOVE_EDGES"}
-FUNCTION_PARAM_KEYS = {"ADD_FUNCTION", "REMOVE_FUNCTION"}
+FUNCTION_PARAM_KEYS = {"ADD_FUNCTION", "REMOVE_FUNCTION", "OPINION_FUNCTION"}
 
 
 class TokenReader:
@@ -90,6 +90,20 @@ def parse_log_params(reader):
 
     params.setdefault("use_weights", 0)
     return params
+
+
+def format_number(value):
+    return f"{value:g}"
+
+
+def describe_opinion_function(log):
+    function = log.get("opinion_function")
+    if function is None and ("k1" in log or "k2" in log):
+        function = {"name": "threshold", "params": [log.get("k1", 0.0), log.get("k2", 1.0)]}
+    if function is None:
+        return ""
+    params = ", ".join(format_number(p) for p in function["params"])
+    return f"Функция мнений: {function['name']}({params})"
 
 
 def parse_log_history(reader):
@@ -226,7 +240,7 @@ def node_colors_for_step(num_vertices, opinions, stubborn):
 
 
 class GraphViewer:
-    def __init__(self, num_vertices, stubborn, states, t_max):
+    def __init__(self, num_vertices, stubborn, states, t_max, subtitle=""):
         self.num_vertices = num_vertices
         self.stubborn = stubborn
         self.states = states
@@ -238,6 +252,8 @@ class GraphViewer:
 
         self.fig, self.ax = plt.subplots(figsize=(8, 7))
         plt.subplots_adjust(bottom=0.2)
+        if subtitle:
+            self.fig.suptitle(subtitle, fontsize=10, color="dimgray")
 
         slider_ax = plt.axes([0.15, 0.08, 0.6, 0.03])
         self.slider = Slider(slider_ax, "Шаг", 0, t_max, valinit=0, valstep=1)
@@ -297,8 +313,8 @@ class GraphViewer:
         plt.show()
 
 
-def run_graph_viewer(num_vertices, stubborn, states, t_max):
-    viewer = GraphViewer(num_vertices, stubborn, states, t_max)
+def run_graph_viewer(num_vertices, stubborn, states, t_max, subtitle=""):
+    viewer = GraphViewer(num_vertices, stubborn, states, t_max, subtitle)
     viewer.show()
 
 
@@ -312,6 +328,9 @@ def run_dynamics_only(log):
     ax1.plot(steps, ones_series, color="red")
     ax1.set_ylabel("Мнение = 1")
     ax1.set_title("Граф слишком большой для визуализации структуры - показана только динамика")
+    subtitle = describe_opinion_function(log)
+    if subtitle:
+        fig.suptitle(subtitle, fontsize=10, color="dimgray")
 
     ax2.plot(steps, edges_series, color="blue")
     ax2.set_ylabel("Число рёбер")
@@ -354,7 +373,7 @@ def main():
         return
 
     states = build_states(num_vertices, initial_edges, stubborn, log)
-    run_graph_viewer(num_vertices, stubborn, states, log["t_max"])
+    run_graph_viewer(num_vertices, stubborn, states, log["t_max"], describe_opinion_function(log))
 
 
 if __name__ == "__main__":

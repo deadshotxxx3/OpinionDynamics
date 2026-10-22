@@ -55,6 +55,37 @@ StubbornGroup buildStubbornGroup(const StubbornArgs& args, const std::string& ta
     return group;
 }
 
+od::model::OpinionFunction buildOpinionFunction(const BatchArgs& args, od::model::OpinionFunction function) {
+    if (!args.opinionFunction.empty()) {
+        std::optional<od::model::OpinionFunctionKind> kind = od::model::opinionKindFromString(args.opinionFunction);
+        if (!kind.has_value()) {
+            throw UsageError("неизвестная функция в --opinion-func: " + args.opinionFunction);
+        }
+        std::optional<std::vector<double>> params = od::io::parseDoubleList(args.opinionParams);
+        if (!params.has_value()) {
+            throw std::invalid_argument("некорректные числа в --opinion-params: '" + args.opinionParams + "'");
+        }
+        function = od::model::OpinionFunction{*kind, *params};
+    } else if (!args.opinionParams.empty()) {
+        throw std::invalid_argument("--opinion-params задан без --opinion-func");
+    }
+
+    if (args.k1.has_value() || args.k2.has_value()) {
+        if (!args.opinionFunction.empty() && function.kind != od::model::OpinionFunctionKind::Threshold) {
+            throw std::invalid_argument("--k1 и --k2 задают пороговую функцию, а выбрана " + args.opinionFunction);
+        }
+        bool isThreshold = function.kind == od::model::OpinionFunctionKind::Threshold && function.params.size() == 2;
+        function = od::model::thresholdFunction(args.k1.value_or(isThreshold ? function.params[0] : 0.0),
+                                                args.k2.value_or(isThreshold ? function.params[1] : 1.0));
+    }
+
+    std::string error = od::model::validateOpinionFunction(function);
+    if (!error.empty()) {
+        throw std::invalid_argument("функция изменения мнений: " + error);
+    }
+    return function;
+}
+
 ManualGenConfig buildConfig(const BatchArgs& args) {
     ManualGenConfig config;
 
@@ -85,8 +116,7 @@ ManualGenConfig buildConfig(const BatchArgs& args) {
         config.edgeRemoveFunction = *removeFunction;
     }
 
-    config.k1 = args.k1.value_or(0.0);
-    config.k2 = args.k2.value_or(1.0);
+    config.opinionFunction = buildOpinionFunction(args, od::model::defaultOpinionFunction());
     config.useWeights = args.useWeights.value_or(false);
     return config;
 }
@@ -111,8 +141,7 @@ SimulationSetup generate(const BatchArgs& args) {
 }
 
 void applyOverrides(RuntimeParams& params, const BatchArgs& args) {
-    params.k1 = args.k1.value_or(params.k1);
-    params.k2 = args.k2.value_or(params.k2);
+    params.opinionFunction = buildOpinionFunction(args, params.opinionFunction);
     params.tMax = args.tMax.value_or(params.tMax);
     params.useWeights = args.useWeights.value_or(params.useWeights);
     params.dynamicEdges = args.dynamicEdges.value_or(params.dynamicEdges);
@@ -138,8 +167,10 @@ SimulationSetup load(const BatchArgs& args) {
     bool paramsLoaded = false;
     od::graph::Graph graph = od::io::loadGraphWithParams(filename, fileParams, paramsLoaded);
 
-    if (!paramsLoaded && !(args.k1 && args.k2 && args.tMax)) {
-        throw std::invalid_argument("в " + filename + " нет секции PARAMS, задайте --k1, --k2 и --tmax");
+    bool opinionsGiven = (args.k1 && args.k2) || !args.opinionFunction.empty();
+    if (!paramsLoaded && !(opinionsGiven && args.tMax)) {
+        throw std::invalid_argument("в " + filename + " нет секции PARAMS, задайте функцию мнений "
+                                    "(--k1 и --k2 или --opinion-func) и --tmax");
     }
 
     RuntimeParams params = paramsLoaded ? paramsFromFile(fileParams) : RuntimeParams{};

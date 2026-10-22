@@ -1,5 +1,6 @@
 #pragma once
 
+#include "od/model/OpinionFunction.hpp"
 #include "od/model/ProbabilityFunction.hpp"
 
 #include <string>
@@ -32,8 +33,7 @@ struct ManualGenConfig {
     bool removeEdges = false;
     od::model::ProbabilityFunction edgeRemoveFunction;
 
-    double k1 = 0.0;
-    double k2 = 1.0;
+    od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction();
     bool useWeights = false;
 };
 
@@ -55,6 +55,7 @@ void collectDynamicEdgesSettings(ManualGenConfig& cnf);
 void collectOpinionModelSettings(ManualGenConfig& cnf);
 
 od::model::ProbabilityFunction collectProbabilityFunction(const std::string& title);
+od::model::OpinionFunction collectOpinionFunction();
 
 ManualGenConfig collectManualGenConfig();
 ManualGenConfig collectGeneralGenConfig();

@@ -3,6 +3,7 @@
 #include "od/config/ManualGenConfig.hpp"
 #include "od/graph/Graph.hpp"
 #include "od/io/GraphIO.hpp"
+#include "od/model/OpinionFunction.hpp"
 #include "od/model/ProbabilityFunction.hpp"
 
 #include <string>
@@ -11,8 +12,7 @@ namespace od::config {
 
 /// @brief Параметры одного прогона симуляции.
 struct RuntimeParams {
-    double k1 = 0.0;            ///< Нижний порог функции смены мнения.
-    double k2 = 1.0;            ///< Верхний порог функции смены мнения.
+    od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction(); ///< Функция изменения мнений.
     bool useWeights = false;    ///< Учитывать веса рёбер при подсчёте доли соседей.
 
     bool dynamicEdges = false;                       ///< Включено появление рёбер.
@@ -46,10 +46,13 @@ void ensureSeed(RuntimeParams& params);
 
 /**
  * @brief Проверяет, что параметры допустимы для запуска.
- * @throws std::invalid_argument Если пороги не удовлетворяют `0 ≤ k1 < k2 ≤ 1`,
+ * @throws std::invalid_argument Если функция изменения мнений некорректна,
  *         число шагов меньше 1 или функция вероятности рёбер некорректна.
  */
 void validateParams(const RuntimeParams& params);
+
+/// @brief Печатает функцию изменения мнений, строка начинается с `indent`.
+void printOpinionFunction(const RuntimeParams& params, const std::string& indent);
 
 /// @brief Печатает настройки динамики рёбер, каждая строка начинается с `indent`.
 void printEdgeDynamics(const RuntimeParams& params, const std::string& indent);

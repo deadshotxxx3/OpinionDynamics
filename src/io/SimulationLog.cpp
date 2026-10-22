@@ -13,8 +13,9 @@ namespace {
 void writeParams(std::ofstream& file, const SimulationLog& log) {
     file << "SEED " << log.seed << "\n";
     file << "T_MAX " << log.tMax << "\n";
-    file << "K1 " << std::setprecision(15) << log.k1 << "\n";
-    file << "K2 " << std::setprecision(15) << log.k2 << "\n";
+    file << "OPINION_FUNCTION ";
+    writeOpinionFunction(file, log.opinionFunction);
+    file << "\n";
     file << "USE_WEIGHTS " << (log.useWeights ? 1 : 0) << "\n";
     file << "DYNAMIC_EDGES " << (log.dynamicEdges ? 1 : 0) << "\n";
     file << "ADD_FUNCTION ";

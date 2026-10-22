@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -142,6 +143,9 @@ struct LegacyLinear {
 void readParamsSection(std::ifstream& file, SimulationParams& params, const std::string& filename) {
     bool hasAddFunction = false;
     bool hasRemoveFunction = false;
+    bool hasOpinionFunction = false;
+    std::optional<double> legacyK1;
+    std::optional<double> legacyK2;
     LegacyLinear legacyAdd;
     LegacyLinear legacyRemove;
 
@@ -151,10 +155,17 @@ void readParamsSection(std::ifstream& file, SimulationParams& params, const std:
             file >> params.seed;
         } else if (token == "T_MAX") {
             file >> params.tMax;
+        } else if (token == "OPINION_FUNCTION") {
+            params.opinionFunction = readOpinionFunction(file, filename);
+            hasOpinionFunction = true;
         } else if (token == "K1") {
-            file >> params.k1;
+            double value = 0.0;
+            file >> value;
+            legacyK1 = value;
         } else if (token == "K2") {
-            file >> params.k2;
+            double value = 0.0;
+            file >> value;
+            legacyK2 = value;
         } else if (token == "USE_WEIGHTS") {
             int v = 0;
             file >> v;
@@ -188,6 +199,9 @@ void readParamsSection(std::ifstream& file, SimulationParams& params, const std:
         }
     }
 
+    if (!hasOpinionFunction && (legacyK1.has_value() || legacyK2.has_value())) {
+        params.opinionFunction = od::model::thresholdFunction(legacyK1.value_or(0.0), legacyK2.value_or(1.0));
+    }
     if (!hasAddFunction && legacyAdd.present()) {
         params.edgeAddFunction = legacyAdd.toFunction();
     }
@@ -197,6 +211,38 @@ void readParamsSection(std::ifstream& file, SimulationParams& params, const std:
 }
 
 } // namespace
+
+void writeOpinionFunction(std::ostream& out, const od::model::OpinionFunction& function) {
+    out << od::model::opinionKindToString(function.kind) << " " << function.params.size();
+    for (double value : function.params) {
+        out << " " << std::setprecision(15) << value;
+    }
+}
+
+od::model::OpinionFunction readOpinionFunction(std::istream& in, const std::string& source) {
+    std::string name;
+    int count = 0;
+    if (!(in >> name >> count) || count < 0) {
+        throw std::runtime_error("Не удалось прочитать функцию изменения мнений в " + source);
+    }
+    std::optional<od::model::OpinionFunctionKind> kind = od::model::opinionKindFromString(name);
+    if (!kind.has_value()) {
+        throw std::runtime_error("Неизвестная функция изменения мнений '" + name + "' в " + source);
+    }
+
+    od::model::OpinionFunction function{*kind, std::vector<double>(static_cast<size_t>(count))};
+    for (double& value : function.params) {
+        if (!(in >> value)) {
+            throw std::runtime_error("Не удалось прочитать параметры функции изменения мнений в " + source);
+        }
+    }
+
+    std::string error = od::model::validateOpinionFunction(function);
+    if (!error.empty()) {
+        throw std::runtime_error(error + " (" + source + ")");
+    }
+    return function;
+}
 
 od::graph::Graph loadGraph(const std::string& filename) {
     std::ifstream file(filename);
@@ -261,8 +307,9 @@ void saveGraphWithParams(
     file << "PARAMS\n";
     file << "SEED " << params.seed << "\n";
     file << "T_MAX " << params.tMax << "\n";
-    file << "K1 " << std::setprecision(15) << params.k1 << "\n";
-    file << "K2 " << std::setprecision(15) << params.k2 << "\n";
+    file << "OPINION_FUNCTION ";
+    writeOpinionFunction(file, params.opinionFunction);
+    file << "\n";
     file << "USE_WEIGHTS " << (params.useWeights ? 1 : 0) << "\n";
     file << "DYNAMIC_EDGES " << (params.dynamicEdges ? 1 : 0) << "\n";
     file << "ADD_FUNCTION ";

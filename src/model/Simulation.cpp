@@ -72,8 +72,8 @@ void printParams(const RuntimeParams& params, const std::string& runDir) {
               << "Seed: " << params.seed << "\n"
               << "Папка прогона: " << runDir << "\n"
               << "T_MAX = " << params.tMax << "\n"
-              << "k1 = " << params.k1 << ", k2 = " << params.k2 << "\n"
               << "Веса рёбер: " << (params.useWeights ? "учитываются" : "не учитываются") << "\n";
+    od::config::printOpinionFunction(params, "");
     od::config::printEdgeDynamics(params, "");
 }
 
@@ -81,8 +81,7 @@ od::io::SimulationLog createLog(const RuntimeParams& params, const RunFiles& fil
     od::io::SimulationLog log;
     log.seed = params.seed;
     log.tMax = params.tMax;
-    log.k1 = params.k1;
-    log.k2 = params.k2;
+    log.opinionFunction = params.opinionFunction;
     log.useWeights = params.useWeights;
     log.dynamicEdges = params.dynamicEdges;
     log.edgeAddFunction = params.edgeAddFunction;
@@ -118,12 +117,12 @@ bool shouldPrintStep(int t, int tMax) {
 }
 
 void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions, const RuntimeParams& params,
-                    int t, std::mt19937& rng, od::io::SimulationLog& log) {
+                    const OpinionRule& rule, int t, std::mt19937& rng, od::io::SimulationLog& log) {
     const int step = t + 1;
 
     evolveEdgesAt(graph, params, t, rng, log);
 
-    std::vector<int> next = stepOpinions(graph, opinions, params.k1, params.k2, params.useWeights, rng);
+    std::vector<int> next = stepOpinions(graph, opinions, rule, params.useWeights, rng);
     recordOpinionChanges(opinions, next, step, log);
     opinions = std::move(next);
 
@@ -163,10 +162,11 @@ void runSimulation(od::graph::Graph graph, RuntimeParams params) {
 
     od::io::SimulationLog log = createLog(params, files);
     std::mt19937 rng(params.seed);
+    const OpinionRule rule = makeRule(params.opinionFunction);
 
     std::cout << "=== Симуляция ===\n";
     for (int t = 0; t < params.tMax; ++t) {
-        simulationStep(graph, opinions, params, t, rng, log);
+        simulationStep(graph, opinions, params, rule, t, rng, log);
     }
 
     std::cout << "\n=== Итог ===\n"

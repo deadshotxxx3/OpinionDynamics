@@ -21,8 +21,7 @@ void checkFunction(const od::model::ProbabilityFunction& function, const std::st
 
 RuntimeParams paramsFromConfig(const ManualGenConfig& config) {
     RuntimeParams params;
-    params.k1 = config.k1;
-    params.k2 = config.k2;
+    params.opinionFunction = config.opinionFunction;
     params.useWeights = config.useWeights;
     params.dynamicEdges = config.dynamicEdges;
     params.edgeAddFunction = config.edgeAddFunction;
@@ -33,8 +32,7 @@ RuntimeParams paramsFromConfig(const ManualGenConfig& config) {
 
 RuntimeParams paramsFromFile(const od::io::SimulationParams& fileParams) {
     RuntimeParams params;
-    params.k1 = fileParams.k1;
-    params.k2 = fileParams.k2;
+    params.opinionFunction = fileParams.opinionFunction;
     params.useWeights = fileParams.useWeights;
     params.dynamicEdges = fileParams.dynamicEdges;
     params.edgeAddFunction = fileParams.edgeAddFunction;
@@ -50,8 +48,7 @@ od::io::SimulationParams toFileParams(const RuntimeParams& params) {
     od::io::SimulationParams fileParams;
     fileParams.seed = params.seed;
     fileParams.tMax = params.tMax;
-    fileParams.k1 = params.k1;
-    fileParams.k2 = params.k2;
+    fileParams.opinionFunction = params.opinionFunction;
     fileParams.useWeights = params.useWeights;
     fileParams.dynamicEdges = params.dynamicEdges;
     fileParams.edgeAddFunction = params.edgeAddFunction;
@@ -68,9 +65,9 @@ void ensureSeed(RuntimeParams& params) {
 }
 
 void validateParams(const RuntimeParams& params) {
-    if (!(params.k1 >= 0.0 && params.k1 < params.k2 && params.k2 <= 1.0)) {
-        throw std::invalid_argument("пороги должны удовлетворять 0 <= k1 < k2 <= 1, получено k1 = "
-                                    + std::to_string(params.k1) + ", k2 = " + std::to_string(params.k2));
+    std::string opinionError = od::model::validateOpinionFunction(params.opinionFunction);
+    if (!opinionError.empty()) {
+        throw std::invalid_argument("функция изменения мнений: " + opinionError);
     }
     if (params.tMax < 1 || params.tMax > MAX_STEPS) {
         throw std::invalid_argument("число шагов должно быть от 1 до " + std::to_string(MAX_STEPS)
@@ -82,6 +79,11 @@ void validateParams(const RuntimeParams& params) {
     if (params.dynamicEdges && params.removeEdges) {
         checkFunction(params.edgeRemoveFunction, "функция исчезновения рёбер");
     }
+}
+
+void printOpinionFunction(const RuntimeParams& params, const std::string& indent) {
+    std::cout << indent << "Функция изменения мнений: "
+              << od::model::describeOpinionFunction(params.opinionFunction) << "\n";
 }
 
 void printEdgeDynamics(const RuntimeParams& params, const std::string& indent) {

@@ -55,8 +55,10 @@ struct BatchArgs {
     std::string loadDir;                    ///< Папка прогона для загрузки.
     bool loadFinalGraph = false;            ///< Загружать `graph_final.txt` вместо `graph_initial.txt`.
 
-    std::optional<double> k1;
-    std::optional<double> k2;
+    std::optional<double> k1;               ///< Порог k1 классической пороговой модели.
+    std::optional<double> k2;               ///< Порог k2 классической пороговой модели.
+    std::string opinionFunction;            ///< Имя функции изменения мнений.
+    std::string opinionParams;              ///< Параметры функции изменения мнений через запятую.
     std::optional<int> tMax;
     std::optional<unsigned int> seed;
     std::optional<bool> useWeights;

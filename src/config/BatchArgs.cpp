@@ -1,6 +1,7 @@
 #include "od/config/BatchArgs.hpp"
 
 #include "od/io/InputHelpers.hpp"
+#include "od/model/OpinionFunction.hpp"
 #include "od/model/ProbabilityFunction.hpp"
 
 #include <climits>
@@ -109,6 +110,8 @@ const std::map<std::string, ValueHandler>& valueFlags() {
         {"--k1",   [](BatchArgs& a, const std::string& f, const std::string& v) { a.k1 = toDouble(f, v); }},
         {"--k2",   [](BatchArgs& a, const std::string& f, const std::string& v) { a.k2 = toDouble(f, v); }},
         {"--tmax", [](BatchArgs& a, const std::string& f, const std::string& v) { a.tMax = toInt(f, v); }},
+        {"--opinion-func",   [](BatchArgs& a, const std::string&, const std::string& v) { a.opinionFunction = v; }},
+        {"--opinion-params", [](BatchArgs& a, const std::string&, const std::string& v) { a.opinionParams = v; }},
         {"--seed", [](BatchArgs& a, const std::string& f, const std::string& v) { a.seed = toSeed(f, v); }},
 
         {"--stubborn-attach",         attachCount},
@@ -192,8 +195,13 @@ void printBatchUsage() {
               << "  --batch --vertices 100 --probability 0.3\n\n"
               << "Загрузка из папки прогона:\n"
               << "  --batch --load-dir runs/run_42 [--load-graph initial|final]\n\n"
-              << "Обязательные параметры симуляции (если не подгружаются из файла):\n"
-              << "  --k1 X --k2 Y [--tmax N] [--seed N]\n\n"
+              << "Параметры симуляции (при загрузке без PARAMS функция мнений и --tmax обязательны):\n"
+              << "  [--tmax N] [--seed N]\n\n"
+              << "Функция изменения мнений (по умолчанию пороговая с k1 = 0, k2 = 1):\n"
+              << "  --opinion-func NAME --opinion-params \"a,b,...\"\n"
+              << "  или для пороговой коротко: --k1 X --k2 Y\n"
+              << "  например: --opinion-func moran --opinion-params 0.5\n"
+              << "  у polynomial коэффициенты от старшей степени: \"3,2,1\" = 3s^2 + 2s + 1\n\n"
               << "Опции:\n"
               << "  --use-weights | --no-weights\n"
               << "  --stubborn-attach N [--stubborn-attach-mode random|manual] [--stubborn-attach-targets 0,2,4]\n"
@@ -201,10 +209,15 @@ void printBatchUsage() {
               << "  --dynamic-edges --add-func NAME --add-params \"a,b,...\"\n"
               << "  --remove-edges --remove-func NAME --remove-params \"a,b,...\"\n"
               << "  (устаревшее: --p0 X --k Y и --remove-p0 X --remove-k Y задают линейную функцию)\n\n"
-              << "Функции:\n";
+              << "Функции вероятности рёбер:\n";
     for (od::model::FunctionKind kind : od::model::allKinds()) {
         std::cout << "  " << od::model::kindToString(kind) << " (" << od::model::paramsDescription(kind)
                   << ") - " << od::model::kindDisplayName(kind) << "\n";
+    }
+    std::cout << "\nФункции изменения мнений (s - доля соседей с мнением):\n";
+    for (od::model::OpinionFunctionKind kind : od::model::allOpinionKinds()) {
+        std::cout << "  " << od::model::opinionKindToString(kind) << " (" << od::model::opinionParamsDescription(kind)
+                  << ") - " << od::model::opinionKindDisplayName(kind) << "\n";
     }
 }
 

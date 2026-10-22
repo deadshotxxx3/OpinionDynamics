@@ -1,6 +1,7 @@
 #pragma once
 
 #include "od/model/EdgeEvolution.hpp"
+#include "od/model/OpinionFunction.hpp"
 #include "od/model/ProbabilityFunction.hpp"
 
 #include <string>
@@ -23,8 +24,7 @@ struct OpinionChange {
 struct SimulationLog {
     unsigned int seed = 0;
     int tMax = 0;
-    double k1 = 0.0;
-    double k2 = 0.0;
+    od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction();
     bool useWeights = false;
     bool dynamicEdges = false;
     od::model::ProbabilityFunction edgeAddFunction;

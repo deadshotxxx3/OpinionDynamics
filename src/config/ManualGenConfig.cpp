@@ -2,6 +2,7 @@
 #include "od/io/InputHelpers.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -206,19 +207,91 @@ void collectDynamicEdgesSettings(ManualGenConfig& cnf){
     }
 }
 
-void collectOpinionModelSettings(ManualGenConfig& cnf){
-    cnf.k1 = od::io::readDoubleUntilValid("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
-    while (cnf.k1 >= 1.0) {
+static od::model::OpinionFunction collectThresholds(){
+    double k1 = od::io::readDoubleUntilValid("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+    while (k1 >= 1.0) {
         std::cout << "k1 должен быть меньше 1, иначе нельзя выбрать k2 > k1\n";
-        cnf.k1 = od::io::readDoubleUntilValid("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
+        k1 = od::io::readDoubleUntilValid("Введите порог k1 (0.0..1.0): ", 0.0, 1.0);
     }
 
-    const std::string k2Prompt = "Введите порог k2 (больше " + std::to_string(cnf.k1) + ", до 1.0): ";
-    cnf.k2 = od::io::readDoubleUntilValid(k2Prompt, cnf.k1, 1.0);
-    while (cnf.k2 <= cnf.k1) {
+    const std::string k2Prompt = "Введите порог k2 (больше " + std::to_string(k1) + ", до 1.0): ";
+    double k2 = od::io::readDoubleUntilValid(k2Prompt, k1, 1.0);
+    while (k2 <= k1) {
         std::cout << "k2 должен быть строго больше k1\n";
-        cnf.k2 = od::io::readDoubleUntilValid(k2Prompt, cnf.k1, 1.0);
+        k2 = od::io::readDoubleUntilValid(k2Prompt, k1, 1.0);
     }
+    return od::model::thresholdFunction(k1, k2);
+}
+
+static od::model::OpinionFunctionKind chooseOpinionKind(){
+    std::vector<od::model::OpinionFunctionKind> kinds = od::model::allOpinionKinds();
+
+    std::cout << "Функция изменения мнений (s - доля соседей с мнением):\n";
+    for (size_t i = 0; i < kinds.size(); ++i) {
+        std::cout << "  " << (i + 1) << " - " << od::model::opinionKindDisplayName(kinds[i]) << "\n";
+    }
+    int choice = od::io::readIntUntilValid("Ввод: ", 1, static_cast<int>(kinds.size()));
+    return kinds[static_cast<size_t>(choice - 1)];
+}
+
+static const int MAX_POLYNOMIAL_DEGREE = 10;
+
+static std::string powerName(int power){
+    if (power == 0) return "свободный член";
+    if (power == 1) return "коэффициент при s";
+    return "коэффициент при s^" + std::to_string(power);
+}
+
+static od::model::OpinionFunction collectPolynomial(){
+    int degree = od::io::readIntUntilValid(
+        "Степень полинома n (0.." + std::to_string(MAX_POLYNOMIAL_DEGREE) + "): ", 0, MAX_POLYNOMIAL_DEGREE);
+
+    od::model::OpinionFunction function{od::model::OpinionFunctionKind::Polynomial, {}};
+    for (int power = degree; power >= 0; --power) {
+        double coefficient = 0.0;
+        while (true) {
+            auto value = od::io::readDouble("  " + powerName(power) + ": ");
+            if (value.has_value() && std::isfinite(*value)) {
+                coefficient = *value;
+                break;
+            }
+        }
+        function.params.push_back(coefficient);
+    }
+
+    return function;
+}
+
+od::model::OpinionFunction collectOpinionFunction(){
+    od::model::OpinionFunction function;
+    function.kind = chooseOpinionKind();
+    if (function.kind == od::model::OpinionFunctionKind::Threshold) {
+        return collectThresholds();
+    }
+    if (function.kind == od::model::OpinionFunctionKind::Polynomial) {
+        return collectPolynomial();
+    }
+
+    const std::string prompt = "Параметры (" + od::model::opinionParamsDescription(function.kind) + ") через запятую: ";
+    while (true) {
+        auto values = od::io::parseDoubleList(od::io::readLine(prompt));
+        if (!values.has_value()) {
+            std::cout << "Некорректные числа, повторите ввод\n";
+            continue;
+        }
+        function.params = *values;
+        std::string error = od::model::validateOpinionFunction(function);
+        if (error.empty()) {
+            break;
+        }
+        std::cout << error << "\n";
+    }
+
+    return function;
+}
+
+void collectOpinionModelSettings(ManualGenConfig& cnf){
+    cnf.opinionFunction = collectOpinionFunction();
     cnf.useWeights = od::io::readYesNo(
         "Учитывать веса рёбер при изменении мнения? Введите y/n: ");
 }
@@ -375,11 +448,9 @@ static ValidationResult validateDynamicEdges(const ManualGenConfig& config){
 }
 
 static ValidationResult validateOpinionModel(const ManualGenConfig& config){
-    if (config.k1 < 0.0 || config.k1 > 1.0 || config.k2 < 0.0 || config.k2 > 1.0) {
-        return {false, "k1 и k2 должны быть в диапазоне [0.0, 1.0]"};
-    }
-    if (config.k1 >= config.k2) {
-        return {false, "k1 должен быть меньше k2"};
+    std::string error = od::model::validateOpinionFunction(config.opinionFunction);
+    if (!error.empty()) {
+        return {false, "Функция изменения мнений: " + error};
     }
     return {true, ""};
 }

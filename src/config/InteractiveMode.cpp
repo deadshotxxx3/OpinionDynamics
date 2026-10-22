@@ -37,8 +37,8 @@ void printLoadedParams(const RuntimeParams& params) {
     std::cout << "Параметры симуляции восстановлены из файла:\n"
               << "  seed = " << params.seed << "\n"
               << "  T_MAX = " << params.tMax << "\n"
-              << "  k1 = " << params.k1 << ", k2 = " << params.k2 << "\n"
               << "  веса: " << (params.useWeights ? "учитываются" : "не учитываются") << "\n";
+    printOpinionFunction(params, "  ");
     printEdgeDynamics(params, "  ");
 }
 

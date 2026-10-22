@@ -1,3 +1,4 @@
+import math
 import os
 import sys
 import subprocess
@@ -23,12 +24,35 @@ EDGE_FUNCTIONS = [
     ("periodic", "Периодическая", "p = a + b·sin(w·t)", "a, b, w", 3, "0.01, 0.005, 0.1"),
 ]
 
-FUNCTION_BY_DISPLAY = {display: (name, hint, count, default)
-                       for name, display, _, hint, count, default in EDGE_FUNCTIONS}
+OPINION_FUNCTIONS = [
+    ("threshold", "Пороговая", "0 при s ≤ k1, (s − k1)/(k2 − k1) до k2, 1 после", "k1, k2", 2, "0.05, 0.5"),
+    ("moran", "Моран", "g = (1 + δ)·s, мнение 1 копируется в 1+δ раз охотнее", "δ ≥ −1", 1, "0.5"),
+    ("polynomial", "Полиномиальная", "g = a·sⁿ + b·sⁿ⁻¹ + … + свободный член",
+     "коэффициенты от старшей степени", -1, "1, 0, 0"),
+    ("exponential", "Экспоненциальная", "g = a·e^(b·s)", "a, b", 2, "1, 5"),
+]
 
-FORMULA_BY_DISPLAY = {display: formula for _, display, formula, _, _, _ in EDGE_FUNCTIONS}
+class FunctionTable:
+    def __init__(self, rows):
+        self.displays = [display for _, display, _, _, _, _ in rows]
+        self.by_display = {display: (name, hint, count, default)
+                           for name, display, _, hint, count, default in rows}
+        self.formulas = {display: formula for _, display, formula, _, _, _ in rows}
+        self.names = {name: display for name, display, _, _, _, _ in rows}
 
-COMBOBOX_WIDTH = max(len(display) for _, display, _, _, _, _ in EDGE_FUNCTIONS) + 2
+
+EDGE_TABLE = FunctionTable(EDGE_FUNCTIONS)
+OPINION_TABLE = FunctionTable(OPINION_FUNCTIONS)
+
+COMBOBOX_WIDTH = max(len(d) for d in EDGE_TABLE.displays + OPINION_TABLE.displays) + 2
+
+
+def check_opinion_params(name, params):
+    if name == "threshold" and not (0.0 <= params[0] < params[1] <= 1.0):
+        return "пороги должны удовлетворять 0 ≤ k1 < k2 ≤ 1"
+    if name == "moran" and params[0] < -1.0:
+        return "у Морана должно быть δ ≥ −1"
+    return ""
 
 
 class SimulationForm:
@@ -43,6 +67,7 @@ class SimulationForm:
         self.stubborn_mode_vars = {}
         self.function_vars = {}
         self.function_hints = {}
+        self.function_tables = {}
 
         self.dynamic_edges_var = tk.BooleanVar()
         self.remove_edges_var = tk.BooleanVar()
@@ -51,6 +76,7 @@ class SimulationForm:
         self.load_graph_var = tk.StringVar(value="initial")
         self.use_weights_var = tk.BooleanVar(value=False)
         self.load_weights_var = tk.StringVar(value="file")
+        self.load_opinion_var = tk.BooleanVar(value=False)
 
         self.generate_frame = None
         self.load_frame = None
@@ -181,8 +207,8 @@ class SimulationForm:
         basics = ttk.LabelFrame(parent, text="Параметры мнений")
         basics.pack(fill="x", padx=10, pady=6)
 
-        self.add_entry(basics, "gen_k1", "Порог k1", "0.05")
-        self.add_entry(basics, "gen_k2", "Порог k2", "0.5")
+        self.build_function_group(
+            basics, "gen_opinion", "Функция изменения мнений", None, "threshold", OPINION_TABLE)
         self.add_entry(basics, "gen_tmax", "Количество шагов", "500")
         self.add_entry(basics, "gen_seed", "Seed (пусто = случайный)", "")
 
@@ -264,8 +290,9 @@ class SimulationForm:
         override_frame = ttk.LabelFrame(outer, text="Переопределить параметры")
         override_frame.pack(fill="x", padx=10, pady=6)
 
-        self.add_entry(override_frame, "load_k1", "Порог k1", "")
-        self.add_entry(override_frame, "load_k2", "Порог k2", "")
+        self.build_function_group(
+            override_frame, "load_opinion", "Функция изменения мнений", self.load_opinion_var,
+            "threshold", OPINION_TABLE, checkbox_text="Переопределить (иначе из файла)")
         self.add_entry(override_frame, "load_tmax", "Количество шагов", "")
         self.add_entry(override_frame, "load_seed", "Seed", "")
 
@@ -289,20 +316,23 @@ class SimulationForm:
         frame.pack(fill="x", padx=10, pady=6)
 
         self.build_function_group(
-            frame, "add", "Появление рёбер", self.dynamic_edges_var, default_name="linear")
+            frame, "add", "Появление рёбер", self.dynamic_edges_var, "linear", EDGE_TABLE)
         self.build_function_group(
-            frame, "remove", "Исчезновение рёбер", self.remove_edges_var, default_name="constant")
+            frame, "remove", "Исчезновение рёбер", self.remove_edges_var, "constant", EDGE_TABLE)
 
         self.dynamic_frame = frame
 
-    def build_function_group(self, parent, prefix, title, enabled_var, default_name):
+    def build_function_group(self, parent, prefix, title, enabled_var, default_name, table,
+                             checkbox_text="Включить"):
         group = ttk.LabelFrame(parent, text=title)
         group.pack(fill="x", padx=6, pady=4)
 
-        ttk.Checkbutton(group, text="Включить", variable=enabled_var).pack(anchor="w", padx=6)
+        if enabled_var is not None:
+            ttk.Checkbutton(group, text=checkbox_text, variable=enabled_var).pack(anchor="w", padx=6)
 
-        displays = [display for _, display, _, _, _, _ in EDGE_FUNCTIONS]
-        default_display = next(d for n, d, _, _, _, _ in EDGE_FUNCTIONS if n == default_name)
+        self.function_tables[prefix] = table
+        displays = table.displays
+        default_display = table.names[default_name]
 
         row = ttk.Frame(group)
         row.pack(fill="x", padx=6, pady=2)
@@ -335,10 +365,11 @@ class SimulationForm:
         self.on_function_changed(prefix)
 
     def on_function_changed(self, prefix):
+        table = self.function_tables[prefix]
         display = self.function_vars[prefix].get()
-        _, hint, _, default = FUNCTION_BY_DISPLAY[display]
+        _, hint, _, default = table.by_display[display]
         self.function_hints[prefix].config(
-            text=f"{FORMULA_BY_DISPLAY[display]}    (параметры: {hint})"
+            text=f"{table.formulas[display]}    (параметры: {hint})"
         )
         entry = self.fields[f"{prefix}_params"]
         entry.delete(0, "end")
@@ -542,25 +573,41 @@ class SimulationForm:
         args += self.build_dynamic_edges_args()
         return args, seed
 
-    def parse_function_params(self, prefix, title):
-        name, hint, expected, _ = FUNCTION_BY_DISPLAY[self.function_vars[prefix].get()]
+    def read_function(self, prefix, title):
+        table = self.function_tables[prefix]
+        name, hint, expected, _ = table.by_display[self.function_vars[prefix].get()]
         raw = self.get_value(f"{prefix}_params")
         values = [v.strip() for v in raw.split(",") if v.strip()]
 
-        for v in values:
-            try:
-                float(v)
-            except ValueError:
-                raise ValueError(f"{title}: параметры должны быть числами через запятую")
+        try:
+            params = [float(v) for v in values]
+        except ValueError:
+            raise ValueError(f"{title}: параметры должны быть числами через запятую")
+        if any(math.isnan(p) or math.isinf(p) for p in params):
+            raise ValueError(f"{title}: параметры должны быть конечными числами")
 
-        if expected == -1 and len(values) < 1:
+        if expected == -1 and len(params) < 1:
             raise ValueError(f"{title}: нужен хотя бы один коэффициент ({hint})")
-        if expected != -1 and len(values) != expected:
+        if expected != -1 and len(params) != expected:
             raise ValueError(
-                f"{title}: нужно параметров {expected} ({hint}), указано {len(values)}"
+                f"{title}: нужно параметров {expected} ({hint}), указано {len(params)}"
             )
 
+        if table is OPINION_TABLE:
+            error = check_opinion_params(name, params)
+            if error:
+                raise ValueError(f"{title}: {error}")
+
+        return name, params
+
+    def parse_function_params(self, prefix, title):
+        name, _ = self.read_function(prefix, title)
+        values = [v.strip() for v in self.get_value(f"{prefix}_params").split(",") if v.strip()]
         return name, ",".join(values)
+
+    def build_opinion_args(self, prefix):
+        name, params = self.parse_function_params(prefix, "Функция изменения мнений")
+        return ["--opinion-func", name, "--opinion-params", params]
 
     def build_dynamic_edges_args(self):
         if not self.dynamic_edges_var.get():
@@ -667,13 +714,12 @@ class SimulationForm:
         args += self.build_stubborn_group_args(
             "assign", "Назначить существующие", unique=True, total_vertices=total_vertices)
 
-        k1 = self.get_value("gen_k1")
-        k2 = self.get_value("gen_k2")
         tmax = self.get_value("gen_tmax")
-        if not k1 or not k2 or not tmax:
-            raise ValueError("Заполните k1, k2 и количество шагов")
+        if not tmax:
+            raise ValueError("Заполните количество шагов")
 
-        args += ["--k1", k1, "--k2", k2, "--tmax", tmax]
+        args += self.build_opinion_args("gen_opinion")
+        args += ["--tmax", tmax]
 
         if self.use_weights_var.get():
             args.append("--use-weights")
@@ -700,10 +746,12 @@ class SimulationForm:
     def build_load_args(self):
         args = ["--load-dir", self.resolve_load_dir(), "--load-graph", self.load_graph_var.get()]
 
-        for key, flag in (("load_k1", "--k1"), ("load_k2", "--k2"), ("load_tmax", "--tmax")):
-            value = self.get_value(key)
-            if value:
-                args += [flag, value]
+        if self.load_opinion_var.get():
+            args += self.build_opinion_args("load_opinion")
+
+        tmax = self.get_value("load_tmax")
+        if tmax:
+            args += ["--tmax", tmax]
 
         weights_mode = self.load_weights_var.get()
         if weights_mode == "on":
