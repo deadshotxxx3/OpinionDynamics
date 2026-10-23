@@ -3,16 +3,22 @@
 #include "od/config/ManualGenConfig.hpp"
 #include "od/graph/Graph.hpp"
 #include "od/io/GraphIO.hpp"
+#include "od/model/InitialOpinions.hpp"
 #include "od/model/OpinionFunction.hpp"
 #include "od/model/ProbabilityFunction.hpp"
 
 #include <string>
+#include <vector>
 
 namespace od::config {
 
 /// @brief Параметры одного прогона симуляции.
 struct RuntimeParams {
+    int numOpinions = od::model::DEFAULT_NUM_OPINIONS; ///< Число мнений, мнения от 0 до `numOpinions − 1`.
     od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction(); ///< Функция изменения мнений.
+    od::model::ChoiceRule choiceRule = od::model::ChoiceRule::Max; ///< Правило выбора нового мнения.
+    std::vector<int> popularity; ///< Мнения от самого популярного, решают ничьи в правиле «максимум».
+    od::model::InitialOpinionSettings initialOpinions; ///< Как выбрать начальные мнения.
     bool useWeights = false;    ///< Учитывать веса рёбер при подсчёте доли соседей.
 
     bool dynamicEdges = false;                       ///< Включено появление рёбер.
@@ -25,10 +31,16 @@ struct RuntimeParams {
     bool seedSpecified = false; ///< `false` — seed будет выбран случайно.
 };
 
-/// @brief Всё, что нужно для запуска: граф и параметры.
+/**
+ * @brief Всё, что нужно для запуска: граф, параметры и, возможно, готовые начальные мнения.
+ *
+ * Если `initialOpinions` пуст, мнения строятся по `params.initialOpinions`.
+ * Готовые мнения берутся из файла графа при загрузке прогона.
+ */
 struct SimulationSetup {
     od::graph::Graph graph;
     RuntimeParams params;
+    std::vector<int> initialOpinions;
 };
 
 /// @brief Берёт параметры модели и динамики рёбер из конфигурации генерации.
@@ -46,13 +58,18 @@ void ensureSeed(RuntimeParams& params);
 
 /**
  * @brief Проверяет, что параметры допустимы для запуска.
- * @throws std::invalid_argument Если функция изменения мнений некорректна,
- *         число шагов меньше 1 или функция вероятности рёбер некорректна.
+ * @throws std::invalid_argument Если число мнений вне `2..MAX_OPINIONS`, функция изменения мнений,
+ *         список популярности или начальные мнения не подходят к числу мнений, число шагов
+ *         вне `1..100000` или функция вероятности рёбер некорректна.
  */
 void validateParams(const RuntimeParams& params);
 
-/// @brief Печатает функцию изменения мнений, строка начинается с `indent`.
-void printOpinionFunction(const RuntimeParams& params, const std::string& indent);
+/// @brief Текст ошибки, если число мнений вне `2..MAX_OPINIONS`, иначе пустая строка.
+std::string validateNumOpinions(int numOpinions);
+
+/// @brief Печатает число мнений, функцию, правило выбора и начальные мнения,
+/// каждая строка начинается с `indent`.
+void printOpinionModel(const RuntimeParams& params, const std::string& indent);
 
 /// @brief Печатает настройки динамики рёбер, каждая строка начинается с `indent`.
 void printEdgeDynamics(const RuntimeParams& params, const std::string& indent);

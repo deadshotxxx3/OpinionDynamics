@@ -2,6 +2,12 @@
 
 #include "od/graph/GraphGenerator.hpp"
 #include "od/io/InputHelpers.hpp"
+#include "od/model/InitialOpinions.hpp"
+
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace od::config {
 
@@ -86,6 +92,49 @@ od::model::OpinionFunction buildOpinionFunction(const BatchArgs& args, od::model
     return function;
 }
 
+od::model::ChoiceRule buildChoiceRule(const BatchArgs& args, od::model::ChoiceRule rule) {
+    if (args.choiceRule.empty()) {
+        return rule;
+    }
+    std::optional<od::model::ChoiceRule> parsed = od::model::choiceRuleFromString(args.choiceRule);
+    if (!parsed.has_value()) {
+        throw UsageError("неизвестное правило в --choice-rule: " + args.choiceRule + ", ожидается proportional или max");
+    }
+    return *parsed;
+}
+
+od::model::InitialGroup buildInitialGroup(const std::optional<std::string>& value, const std::string& flag,
+                                          od::model::InitialGroup group) {
+    if (!value.has_value()) {
+        return group;
+    }
+    std::optional<od::model::InitialGroup> parsed = od::model::initialGroupFromString(*value);
+    if (!parsed.has_value()) {
+        throw std::invalid_argument("некорректное значение " + flag + ": '" + *value
+                                    + "', ожидается random или номер мнения");
+    }
+    return *parsed;
+}
+
+bool hasInitialOverrides(const BatchArgs& args) {
+    return args.initialRegular.has_value() || args.initialStubborn.has_value() || args.initialManual.has_value();
+}
+
+od::model::InitialOpinionSettings buildInitialOpinions(const BatchArgs& args,
+                                                       od::model::InitialOpinionSettings settings) {
+    settings.regular = buildInitialGroup(args.initialRegular, "--initial-regular", settings.regular);
+    settings.stubborn = buildInitialGroup(args.initialStubborn, "--initial-stubborn", settings.stubborn);
+    if (args.initialManual.has_value()) {
+        auto manual = od::model::manualOpinionsFromString(*args.initialManual);
+        if (!manual.has_value()) {
+            throw std::invalid_argument("некорректное значение --initial-opinions: '" + *args.initialManual
+                                        + "', ожидается вершина:мнение через запятую");
+        }
+        settings.manual = *manual;
+    }
+    return settings;
+}
+
 ManualGenConfig buildConfig(const BatchArgs& args) {
     ManualGenConfig config;
 
@@ -116,7 +165,11 @@ ManualGenConfig buildConfig(const BatchArgs& args) {
         config.edgeRemoveFunction = *removeFunction;
     }
 
+    config.numOpinions = args.numOpinions.value_or(od::model::DEFAULT_NUM_OPINIONS);
     config.opinionFunction = buildOpinionFunction(args, od::model::defaultOpinionFunction());
+    config.choiceRule = buildChoiceRule(args, od::model::ChoiceRule::Max);
+    config.popularity = args.popularity.value_or(std::vector<int>{});
+    config.initialOpinions = buildInitialOpinions(args, od::model::InitialOpinionSettings{});
     config.useWeights = args.useWeights.value_or(false);
     return config;
 }
@@ -137,11 +190,15 @@ SimulationSetup generate(const BatchArgs& args) {
     }
     ensureSeed(params);
 
-    return SimulationSetup{od::graph::generateGraph(config, params.seed), params};
+    return SimulationSetup{od::graph::generateGraph(config, params.seed), params, {}};
 }
 
 void applyOverrides(RuntimeParams& params, const BatchArgs& args) {
+    params.numOpinions = args.numOpinions.value_or(params.numOpinions);
     params.opinionFunction = buildOpinionFunction(args, params.opinionFunction);
+    params.choiceRule = buildChoiceRule(args, params.choiceRule);
+    params.popularity = args.popularity.value_or(params.popularity);
+    params.initialOpinions = buildInitialOpinions(args, params.initialOpinions);
     params.tMax = args.tMax.value_or(params.tMax);
     params.useWeights = args.useWeights.value_or(params.useWeights);
     params.dynamicEdges = args.dynamicEdges.value_or(params.dynamicEdges);
@@ -163,20 +220,19 @@ SimulationSetup load(const BatchArgs& args) {
     const std::string filename = args.loadDir + "/"
         + (args.loadFinalGraph ? "graph_final.txt" : "graph_initial.txt");
 
-    od::io::SimulationParams fileParams;
-    bool paramsLoaded = false;
-    od::graph::Graph graph = od::io::loadGraphWithParams(filename, fileParams, paramsLoaded);
+    od::io::GraphFile file = od::io::loadGraphFile(filename);
 
     bool opinionsGiven = (args.k1 && args.k2) || !args.opinionFunction.empty();
-    if (!paramsLoaded && !(opinionsGiven && args.tMax)) {
+    if (!file.paramsLoaded && !(opinionsGiven && args.tMax)) {
         throw std::invalid_argument("в " + filename + " нет секции PARAMS, задайте функцию мнений "
                                     "(--k1 и --k2 или --opinion-func) и --tmax");
     }
 
-    RuntimeParams params = paramsLoaded ? paramsFromFile(fileParams) : RuntimeParams{};
+    RuntimeParams params = file.paramsLoaded ? paramsFromFile(file.params) : RuntimeParams{};
     applyOverrides(params, args);
 
-    return SimulationSetup{std::move(graph), params};
+    std::vector<int> opinions = hasInitialOverrides(args) ? std::vector<int>{} : std::move(file.opinions);
+    return SimulationSetup{std::move(file.graph), params, std::move(opinions)};
 }
 
 } // namespace

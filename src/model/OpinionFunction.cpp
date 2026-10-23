@@ -1,5 +1,6 @@
 #include "od/model/OpinionFunction.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <sstream>
 
@@ -33,24 +34,28 @@ double rawValue(const OpinionFunction& f, double s) {
     return 0.0;
 }
 
-int expectedParamCount(OpinionFunctionKind kind) {
-    switch (kind) {
-        case OpinionFunctionKind::Threshold:   return 2;
-        case OpinionFunctionKind::Moran:       return 1;
-        case OpinionFunctionKind::Polynomial:  return -1;
-        case OpinionFunctionKind::Exponential: return 2;
-        case OpinionFunctionKind::Rest:        return 0;
+std::string paramCountError(const OpinionFunction& function) {
+    const std::string name = opinionKindToString(function.kind);
+    const size_t count = function.params.size();
+    const std::string received = ", получено " + std::to_string(count);
+    const std::string described = " (" + opinionParamsDescription(function.kind) + ")";
+
+    switch (function.kind) {
+        case OpinionFunctionKind::Threshold:
+        case OpinionFunctionKind::Exponential:
+            return count == 2 ? "" : "функции " + name + " нужно параметров: 2" + described + received;
+        case OpinionFunctionKind::Moran:
+            return count == 1 || count == 2 ? "" : "функции " + name + " нужен 1 или 2 параметра" + described + received;
+        case OpinionFunctionKind::Polynomial:
+            return count >= 1 ? "" : "функции " + name + " нужен хотя бы один коэффициент";
+        case OpinionFunctionKind::Rest:
+            return "";
     }
-    return 0;
+    return "";
 }
 
-int findRest(const OpinionRule& rule) {
-    for (size_t k = 0; k < rule.size(); ++k) {
-        if (rule[k].kind == OpinionFunctionKind::Rest) {
-            return static_cast<int>(k);
-        }
-    }
-    return -1;
+bool isOpinionNumber(double value) {
+    return value >= 0.0 && value < MAX_OPINIONS && value == std::floor(value);
 }
 
 std::string formatParams(const std::vector<double>& params) {
@@ -72,41 +77,34 @@ double evaluateInfluence(const OpinionFunction& function, double share) {
     return value;
 }
 
-std::vector<double> adoptionProbabilities(const OpinionRule& rule, const std::vector<double>& shares) {
-    std::vector<double> probabilities(rule.size(), 0.0);
+std::vector<OpinionChance> adoptionProbabilities(const OpinionRule& rule, const std::vector<OpinionShare>& shares) {
+    std::vector<OpinionChance> chances;
+    chances.reserve(shares.size() + 1);
+
     double sum = 0.0;
-    for (size_t k = 0; k < rule.size(); ++k) {
-        probabilities[k] = evaluateInfluence(rule[k], shares[k]);
-        sum += probabilities[k];
-    }
-
-    int rest = findRest(rule);
-    if (rest >= 0 && sum <= 1.0) {
-        probabilities[static_cast<size_t>(rest)] = 1.0 - sum;
-        return probabilities;
-    }
-
-    if (sum <= 0.0 || !std::isfinite(sum)) {
-        return std::vector<double>(rule.size(), 0.0);
-    }
-    for (double& p : probabilities) {
-        p /= sum;
-    }
-    return probabilities;
-}
-
-std::vector<int> samplingOrder(const OpinionRule& rule) {
-    std::vector<int> order;
-    int rest = findRest(rule);
-    for (int k = 0; k < static_cast<int>(rule.size()); ++k) {
-        if (k != rest) {
-            order.push_back(k);
+    for (const OpinionShare& item : shares) {
+        if (item.opinion == rule.restOpinion) {
+            continue;
         }
+        double value = evaluateInfluence(rule.functions[static_cast<size_t>(item.opinion)], item.share);
+        chances.push_back(OpinionChance{item.opinion, value});
+        sum += value;
     }
-    if (rest >= 0) {
-        order.push_back(rest);
+
+    const bool hasRest = rule.restOpinion >= 0;
+    if (hasRest && sum <= 1.0) {
+        chances.push_back(OpinionChance{rule.restOpinion, 1.0 - sum});
+        return chances;
     }
-    return order;
+
+    const bool keepOpinion = sum <= 0.0 || !std::isfinite(sum);
+    for (OpinionChance& chance : chances) {
+        chance.probability = keepOpinion ? 0.0 : chance.probability / sum;
+    }
+    if (hasRest) {
+        chances.push_back(OpinionChance{rule.restOpinion, 0.0});
+    }
+    return chances;
 }
 
 OpinionFunction thresholdFunction(double k1, double k2) {
@@ -117,15 +115,35 @@ OpinionFunction defaultOpinionFunction() {
     return thresholdFunction(0.0, 1.0);
 }
 
-OpinionRule makeRule(const OpinionFunction& function) {
+int moranMutant(const OpinionFunction& function) {
+    if (function.kind == OpinionFunctionKind::Moran && function.params.size() >= 2) {
+        return static_cast<int>(function.params[1]);
+    }
+    return DEFAULT_MORAN_MUTANT;
+}
+
+OpinionRule makeRule(const OpinionFunction& function, int numOpinions, ChoiceRule choice) {
+    const size_t size = static_cast<size_t>(numOpinions);
+    OpinionRule rule;
+
     switch (function.kind) {
         case OpinionFunctionKind::Threshold:
-            return {OpinionFunction{OpinionFunctionKind::Rest, {}}, function};
+            rule.functions.assign(size, function);
+            if (choice == ChoiceRule::Proportional) {
+                rule.functions[0] = OpinionFunction{OpinionFunctionKind::Rest, {}};
+                rule.restOpinion = 0;
+            }
+            break;
         case OpinionFunctionKind::Moran:
-            return {OpinionFunction{OpinionFunctionKind::Moran, {0.0}}, function};
+            rule.functions.assign(size, OpinionFunction{OpinionFunctionKind::Moran, {0.0}});
+            rule.functions[static_cast<size_t>(moranMutant(function))] =
+                OpinionFunction{OpinionFunctionKind::Moran, {function.params[0]}};
+            break;
         default:
-            return OpinionRule(static_cast<size_t>(NUM_OPINIONS), function);
+            rule.functions.assign(size, function);
+            break;
     }
+    return rule;
 }
 
 std::vector<OpinionFunctionKind> allOpinionKinds() {
@@ -160,7 +178,7 @@ std::optional<OpinionFunctionKind> opinionKindFromString(const std::string& name
 std::string opinionKindDisplayName(OpinionFunctionKind kind) {
     switch (kind) {
         case OpinionFunctionKind::Threshold:   return "Пороговая: 0 при s <= k1, (s - k1)/(k2 - k1) до k2, 1 после";
-        case OpinionFunctionKind::Moran:       return "Моран: (1 + delta)*s";
+        case OpinionFunctionKind::Moran:       return "Моран: (1 + delta)*s у мнения-мутанта, s у остальных";
         case OpinionFunctionKind::Polynomial:  return "Полиномиальная: a*s^n + b*s^(n-1) + ... + свободный член";
         case OpinionFunctionKind::Exponential: return "Экспоненциальная: a * e^(b*s)";
         case OpinionFunctionKind::Rest:        return "Остаток: 1 - сумма остальных мнений";
@@ -171,7 +189,7 @@ std::string opinionKindDisplayName(OpinionFunctionKind kind) {
 std::string opinionParamsDescription(OpinionFunctionKind kind) {
     switch (kind) {
         case OpinionFunctionKind::Threshold:   return "k1, k2";
-        case OpinionFunctionKind::Moran:       return "delta";
+        case OpinionFunctionKind::Moran:       return "delta[, мнение-мутант, по умолчанию 1]";
         case OpinionFunctionKind::Polynomial:  return "коэффициенты от старшей степени к свободному члену";
         case OpinionFunctionKind::Exponential: return "a, b";
         case OpinionFunctionKind::Rest:        return "без параметров";
@@ -179,20 +197,28 @@ std::string opinionParamsDescription(OpinionFunctionKind kind) {
     return "";
 }
 
+std::string choiceRuleToString(ChoiceRule rule) {
+    return rule == ChoiceRule::Max ? "max" : "proportional";
+}
+
+std::optional<ChoiceRule> choiceRuleFromString(const std::string& name) {
+    if (name == "proportional") return ChoiceRule::Proportional;
+    if (name == "max") return ChoiceRule::Max;
+    return std::nullopt;
+}
+
+std::string choiceRuleDisplayName(ChoiceRule rule) {
+    return rule == ChoiceRule::Max ? "максимум" : "пропорционально";
+}
+
 std::string validateOpinionFunction(const OpinionFunction& function) {
     const std::string name = opinionKindToString(function.kind);
     if (function.kind == OpinionFunctionKind::Rest) {
         return "служебную функцию rest нельзя выбрать для модели";
     }
-    int expected = expectedParamCount(function.kind);
-    int actual = static_cast<int>(function.params.size());
-
-    if (expected == -1 && actual < 1) {
-        return "функции " + name + " нужен хотя бы один коэффициент";
-    }
-    if (expected != -1 && actual != expected) {
-        return "функции " + name + " нужно параметров: " + std::to_string(expected)
-               + " (" + opinionParamsDescription(function.kind) + "), получено " + std::to_string(actual);
+    std::string countError = paramCountError(function);
+    if (!countError.empty()) {
+        return countError;
     }
     for (double value : function.params) {
         if (!std::isfinite(value)) {
@@ -207,33 +233,79 @@ std::string validateOpinionFunction(const OpinionFunction& function) {
     if (function.kind == OpinionFunctionKind::Moran && p[0] < -1.0) {
         return "у функции moran должно быть delta >= -1";
     }
+    if (function.kind == OpinionFunctionKind::Moran && p.size() == 2 && !isOpinionNumber(p[1])) {
+        return "мнение-мутант функции moran должно быть целым числом от 0 до "
+               + std::to_string(MAX_OPINIONS - 1);
+    }
     return "";
 }
 
-std::string validateOpinionRule(const OpinionRule& rule) {
-    if (static_cast<int>(rule.size()) != NUM_OPINIONS) {
-        return "нужно задать функции для " + std::to_string(NUM_OPINIONS) + " мнений, задано "
-               + std::to_string(rule.size());
+std::string validatePopularity(const std::vector<int>& popularity, int numOpinions) {
+    std::vector<char> listed(static_cast<size_t>(std::max(numOpinions, 0)), 0);
+    for (int opinion : popularity) {
+        if (opinion < 0 || opinion >= numOpinions) {
+            return "в списке популярности мнение " + std::to_string(opinion) + " вне диапазона от 0 до "
+                   + std::to_string(numOpinions - 1);
+        }
+        if (listed[static_cast<size_t>(opinion)]) {
+            return "в списке популярности мнение " + std::to_string(opinion) + " повторяется";
+        }
+        listed[static_cast<size_t>(opinion)] = 1;
     }
-    int restCount = 0;
-    for (size_t k = 0; k < rule.size(); ++k) {
-        if (rule[k].kind == OpinionFunctionKind::Rest) {
-            ++restCount;
+    return "";
+}
+
+std::string validateOpinionSettings(const OpinionFunction& function, const std::vector<int>& popularity,
+                                    int numOpinions) {
+    std::string error = validateOpinionFunction(function);
+    if (!error.empty()) {
+        return error;
+    }
+    if (function.kind == OpinionFunctionKind::Moran && moranMutant(function) >= numOpinions) {
+        return "мнение-мутант " + std::to_string(moranMutant(function)) + " вне диапазона мнений от 0 до "
+               + std::to_string(numOpinions - 1);
+    }
+    return validatePopularity(popularity, numOpinions);
+}
+
+std::string validateOpinionRule(const OpinionRule& rule) {
+    const int size = static_cast<int>(rule.functions.size());
+    if (size < 2 || size > MAX_OPINIONS) {
+        return "в правиле должно быть от 2 до " + std::to_string(MAX_OPINIONS) + " мнений, задано "
+               + std::to_string(size);
+    }
+    for (int k = 0; k < size; ++k) {
+        const OpinionFunction& function = rule.functions[static_cast<size_t>(k)];
+        if (function.kind == OpinionFunctionKind::Rest) {
+            if (k != rule.restOpinion) {
+                return "функция rest у мнения " + std::to_string(k) + " не отмечена в restOpinion";
+            }
             continue;
         }
-        std::string error = validateOpinionFunction(rule[k]);
+        std::string error = validateOpinionFunction(function);
         if (!error.empty()) {
             return "мнение " + std::to_string(k) + ": " + error;
         }
     }
-    if (restCount > 1) {
-        return "функция rest может быть только у одного мнения";
+    if (rule.restOpinion >= size
+        || (rule.restOpinion >= 0
+            && rule.functions[static_cast<size_t>(rule.restOpinion)].kind != OpinionFunctionKind::Rest)) {
+        return "restOpinion указывает на мнение без функции rest";
     }
     return "";
 }
 
 std::string describeOpinionFunction(const OpinionFunction& function) {
     return opinionKindToString(function.kind) + "(" + formatParams(function.params) + ")";
+}
+
+std::string describeOpinionList(const std::vector<int>& opinions) {
+    std::ostringstream out;
+    for (size_t i = 0; i < opinions.size(); ++i) {
+        if (i > 0) out << ", ";
+        out << opinions[i];
+    }
+    return out.str();
 }
 
 } // namespace od::model

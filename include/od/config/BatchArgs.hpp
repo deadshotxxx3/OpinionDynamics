@@ -55,10 +55,16 @@ struct BatchArgs {
     std::string loadDir;                    ///< Папка прогона для загрузки.
     bool loadFinalGraph = false;            ///< Загружать `graph_final.txt` вместо `graph_initial.txt`.
 
+    std::optional<int> numOpinions;         ///< Число мнений.
     std::optional<double> k1;               ///< Порог k1 классической пороговой модели.
     std::optional<double> k2;               ///< Порог k2 классической пороговой модели.
     std::string opinionFunction;            ///< Имя функции изменения мнений.
     std::string opinionParams;              ///< Параметры функции изменения мнений через запятую.
+    std::string choiceRule;                 ///< Имя правила выбора нового мнения: `proportional` или `max`.
+    std::optional<std::vector<int>> popularity; ///< Мнения от самого популярного для ничьих в правиле `max`.
+    std::optional<std::string> initialRegular;  ///< Начальное мнение обычных вершин: `random` или номер.
+    std::optional<std::string> initialStubborn; ///< Начальное мнение упрямых вершин: `random` или номер.
+    std::optional<std::string> initialManual;   ///< Мнения отдельных вершин: `вершина:мнение,…`.
     std::optional<int> tMax;
     std::optional<unsigned int> seed;
     std::optional<bool> useWeights;

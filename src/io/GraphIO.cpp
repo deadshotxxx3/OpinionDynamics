@@ -46,7 +46,70 @@ od::model::ProbabilityFunction readFunction(std::istream& in, const std::string&
     return function;
 }
 
-void saveGraph(const od::graph::Graph& graph, const std::string& filename) {
+void writeOpinionFunction(std::ostream& out, const od::model::OpinionFunction& function) {
+    out << od::model::opinionKindToString(function.kind) << " " << function.params.size();
+    for (double value : function.params) {
+        out << " " << std::setprecision(15) << value;
+    }
+}
+
+od::model::OpinionFunction readOpinionFunction(std::istream& in, const std::string& source) {
+    std::string name;
+    int count = 0;
+    if (!(in >> name >> count) || count < 0) {
+        throw std::runtime_error("Не удалось прочитать функцию изменения мнений в " + source);
+    }
+    std::optional<od::model::OpinionFunctionKind> kind = od::model::opinionKindFromString(name);
+    if (!kind.has_value()) {
+        throw std::runtime_error("Неизвестная функция изменения мнений '" + name + "' в " + source);
+    }
+
+    od::model::OpinionFunction function{*kind, std::vector<double>(static_cast<size_t>(count))};
+    for (double& value : function.params) {
+        if (!(in >> value)) {
+            throw std::runtime_error("Не удалось прочитать параметры функции изменения мнений в " + source);
+        }
+    }
+
+    std::string error = od::model::validateOpinionFunction(function);
+    if (!error.empty()) {
+        throw std::runtime_error(error + " (" + source + ")");
+    }
+    return function;
+}
+
+void writeParamsLines(std::ostream& out, const SimulationParams& params) {
+    out << "SEED " << params.seed << "\n";
+    out << "T_MAX " << params.tMax << "\n";
+    out << "NUM_OPINIONS " << params.numOpinions << "\n";
+    out << "OPINION_FUNCTION ";
+    writeOpinionFunction(out, params.opinionFunction);
+    out << "\n";
+    out << "CHOICE_RULE " << od::model::choiceRuleToString(params.choiceRule) << "\n";
+    out << "POPULARITY " << params.popularity.size();
+    for (int opinion : params.popularity) {
+        out << " " << opinion;
+    }
+    out << "\n";
+    out << "INITIAL_REGULAR " << od::model::initialGroupToString(params.initialOpinions.regular) << "\n";
+    out << "INITIAL_STUBBORN " << od::model::initialGroupToString(params.initialOpinions.stubborn) << "\n";
+    out << "INITIAL_MANUAL " << params.initialOpinions.manual.size();
+    for (const od::model::ManualOpinion& item : params.initialOpinions.manual) {
+        out << " " << item.vertex << " " << item.opinion;
+    }
+    out << "\n";
+    out << "USE_WEIGHTS " << (params.useWeights ? 1 : 0) << "\n";
+    out << "DYNAMIC_EDGES " << (params.dynamicEdges ? 1 : 0) << "\n";
+    out << "ADD_FUNCTION ";
+    writeFunction(out, params.edgeAddFunction);
+    out << "\n";
+    out << "REMOVE_EDGES " << (params.removeEdges ? 1 : 0) << "\n";
+    out << "REMOVE_FUNCTION ";
+    writeFunction(out, params.edgeRemoveFunction);
+    out << "\n";
+}
+
+void saveGraph(const od::graph::Graph& graph, const std::vector<int>& opinions, const std::string& filename) {
     std::ofstream file(filename);
     if (!file.is_open()) {
         throw std::runtime_error("saveGraph: не удалось открыть файл для записи: " + filename);
@@ -92,8 +155,32 @@ void saveGraph(const od::graph::Graph& graph, const std::string& filename) {
         file << e.from << " " << e.to << " " << e.weight << "\n";
     }
 
+    if (!opinions.empty()) {
+        file << "OPINIONS " << opinions.size() << "\n";
+        for (int opinion : opinions) {
+            file << opinion << "\n";
+        }
+    }
+
     if (!file.good()) {
         throw std::runtime_error("saveGraph: ошибка при записи в файл: " + filename);
+    }
+}
+
+void saveGraphWithParams(const od::graph::Graph& graph, const std::vector<int>& opinions,
+                         const SimulationParams& params, const std::string& filename) {
+    saveGraph(graph, opinions, filename);
+
+    std::ofstream file(filename, std::ios::app);
+    if (!file.is_open()) {
+        throw std::runtime_error("saveGraphWithParams: не удалось открыть файл для дозаписи: " + filename);
+    }
+
+    file << "\nPARAMS\n";
+    writeParamsLines(file, params);
+
+    if (!file.good()) {
+        throw std::runtime_error("saveGraphWithParams: ошибка при записи PARAMS в " + filename);
     }
 }
 
@@ -111,7 +198,7 @@ void expectToken(std::ifstream& file, const std::string& expected, const std::st
     }
 }
 
-int readCount(std::ifstream& file, const std::string& what, const std::string& filename) {
+int readCount(std::istream& file, const std::string& what, const std::string& filename) {
     int value = 0;
     if (!(file >> value)) {
         throw std::runtime_error("loadGraph: не удалось прочитать " + what + " из " + filename);
@@ -122,134 +209,7 @@ int readCount(std::ifstream& file, const std::string& what, const std::string& f
     return value;
 }
 
-struct LegacyLinear {
-    bool hasA = false;
-    bool hasB = false;
-    double a = 0.0;
-    double b = 0.0;
-
-    bool present() const {
-        return hasA || hasB;
-    }
-
-    od::model::ProbabilityFunction toFunction() const {
-        od::model::ProbabilityFunction function;
-        function.kind = od::model::FunctionKind::Linear;
-        function.params = {a, b};
-        return function;
-    }
-};
-
-void readParamsSection(std::ifstream& file, SimulationParams& params, const std::string& filename) {
-    bool hasAddFunction = false;
-    bool hasRemoveFunction = false;
-    bool hasOpinionFunction = false;
-    std::optional<double> legacyK1;
-    std::optional<double> legacyK2;
-    LegacyLinear legacyAdd;
-    LegacyLinear legacyRemove;
-
-    std::string token;
-    while (file >> token) {
-        if (token == "SEED") {
-            file >> params.seed;
-        } else if (token == "T_MAX") {
-            file >> params.tMax;
-        } else if (token == "OPINION_FUNCTION") {
-            params.opinionFunction = readOpinionFunction(file, filename);
-            hasOpinionFunction = true;
-        } else if (token == "K1") {
-            double value = 0.0;
-            file >> value;
-            legacyK1 = value;
-        } else if (token == "K2") {
-            double value = 0.0;
-            file >> value;
-            legacyK2 = value;
-        } else if (token == "USE_WEIGHTS") {
-            int v = 0;
-            file >> v;
-            params.useWeights = (v != 0);
-        } else if (token == "DYNAMIC_EDGES") {
-            int v = 0;
-            file >> v;
-            params.dynamicEdges = (v != 0);
-        } else if (token == "REMOVE_EDGES") {
-            int v = 0;
-            file >> v;
-            params.removeEdges = (v != 0);
-        } else if (token == "ADD_FUNCTION") {
-            params.edgeAddFunction = readFunction(file, filename);
-            hasAddFunction = true;
-        } else if (token == "REMOVE_FUNCTION") {
-            params.edgeRemoveFunction = readFunction(file, filename);
-            hasRemoveFunction = true;
-        } else if (token == "P0") {
-            file >> legacyAdd.a;
-            legacyAdd.hasA = true;
-        } else if (token == "K") {
-            file >> legacyAdd.b;
-            legacyAdd.hasB = true;
-        } else if (token == "REMOVE_P0") {
-            file >> legacyRemove.a;
-            legacyRemove.hasA = true;
-        } else if (token == "REMOVE_K") {
-            file >> legacyRemove.b;
-            legacyRemove.hasB = true;
-        }
-    }
-
-    if (!hasOpinionFunction && (legacyK1.has_value() || legacyK2.has_value())) {
-        params.opinionFunction = od::model::thresholdFunction(legacyK1.value_or(0.0), legacyK2.value_or(1.0));
-    }
-    if (!hasAddFunction && legacyAdd.present()) {
-        params.edgeAddFunction = legacyAdd.toFunction();
-    }
-    if (!hasRemoveFunction && legacyRemove.present()) {
-        params.edgeRemoveFunction = legacyRemove.toFunction();
-    }
-}
-
-} // namespace
-
-void writeOpinionFunction(std::ostream& out, const od::model::OpinionFunction& function) {
-    out << od::model::opinionKindToString(function.kind) << " " << function.params.size();
-    for (double value : function.params) {
-        out << " " << std::setprecision(15) << value;
-    }
-}
-
-od::model::OpinionFunction readOpinionFunction(std::istream& in, const std::string& source) {
-    std::string name;
-    int count = 0;
-    if (!(in >> name >> count) || count < 0) {
-        throw std::runtime_error("Не удалось прочитать функцию изменения мнений в " + source);
-    }
-    std::optional<od::model::OpinionFunctionKind> kind = od::model::opinionKindFromString(name);
-    if (!kind.has_value()) {
-        throw std::runtime_error("Неизвестная функция изменения мнений '" + name + "' в " + source);
-    }
-
-    od::model::OpinionFunction function{*kind, std::vector<double>(static_cast<size_t>(count))};
-    for (double& value : function.params) {
-        if (!(in >> value)) {
-            throw std::runtime_error("Не удалось прочитать параметры функции изменения мнений в " + source);
-        }
-    }
-
-    std::string error = od::model::validateOpinionFunction(function);
-    if (!error.empty()) {
-        throw std::runtime_error(error + " (" + source + ")");
-    }
-    return function;
-}
-
-od::graph::Graph loadGraph(const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("loadGraph: не удалось открыть файл: " + filename);
-    }
-
+od::graph::Graph readGraphBody(std::ifstream& file, const std::string& filename) {
     expectToken(file, "VERTICES", filename);
     int numVertices = readCount(file, "количество вершин", filename);
 
@@ -291,67 +251,201 @@ od::graph::Graph loadGraph(const std::string& filename) {
     return graph;
 }
 
-void saveGraphWithParams(
-    const od::graph::Graph& graph,
-    const SimulationParams& params,
-    const std::string& filename
-) {
-    saveGraph(graph, filename);
-
-    std::ofstream file(filename, std::ios::app);
-    if (!file.is_open()) {
-        throw std::runtime_error("saveGraphWithParams: не удалось открыть файл для дозаписи: " + filename);
+std::vector<int> readOpinions(std::istream& file, int numVertices, const std::string& filename) {
+    int count = readCount(file, "количество мнений", filename);
+    if (count != numVertices) {
+        throw std::runtime_error("loadGraph: в секции OPINIONS " + std::to_string(count)
+                                 + " мнений, а вершин " + std::to_string(numVertices) + " в " + filename);
     }
-
-    file << "\n";
-    file << "PARAMS\n";
-    file << "SEED " << params.seed << "\n";
-    file << "T_MAX " << params.tMax << "\n";
-    file << "OPINION_FUNCTION ";
-    writeOpinionFunction(file, params.opinionFunction);
-    file << "\n";
-    file << "USE_WEIGHTS " << (params.useWeights ? 1 : 0) << "\n";
-    file << "DYNAMIC_EDGES " << (params.dynamicEdges ? 1 : 0) << "\n";
-    file << "ADD_FUNCTION ";
-    writeFunction(file, params.edgeAddFunction);
-    file << "\n";
-    file << "REMOVE_EDGES " << (params.removeEdges ? 1 : 0) << "\n";
-    file << "REMOVE_FUNCTION ";
-    writeFunction(file, params.edgeRemoveFunction);
-    file << "\n";
-
-    if (!file.good()) {
-        throw std::runtime_error("saveGraphWithParams: ошибка при записи PARAMS в " + filename);
+    std::vector<int> opinions(static_cast<size_t>(count));
+    for (int& opinion : opinions) {
+        if (!(file >> opinion) || opinion < 0) {
+            throw std::runtime_error("loadGraph: не удалось прочитать мнение вершины из " + filename);
+        }
     }
+    return opinions;
 }
 
-od::graph::Graph loadGraphWithParams(
-    const std::string& filename,
-    SimulationParams& params,
-    bool& paramsLoaded
-) {
-    paramsLoaded = false;
-
-    od::graph::Graph graph = loadGraph(filename);
-
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        throw std::runtime_error("loadGraphWithParams: не удалось открыть файл: " + filename);
+od::model::InitialGroup readInitialGroup(std::istream& in, const std::string& source) {
+    std::string token;
+    std::optional<od::model::InitialGroup> group;
+    if (in >> token) {
+        group = od::model::initialGroupFromString(token);
     }
+    if (!group.has_value()) {
+        throw std::runtime_error("Не удалось прочитать начальное мнение группы в " + source);
+    }
+    return *group;
+}
+
+std::vector<od::model::ManualOpinion> readManualOpinions(std::istream& in, const std::string& source) {
+    int count = 0;
+    if (!(in >> count) || count < 0) {
+        throw std::runtime_error("Не удалось прочитать ручные начальные мнения в " + source);
+    }
+    std::vector<od::model::ManualOpinion> manual(static_cast<size_t>(count));
+    for (od::model::ManualOpinion& item : manual) {
+        if (!(in >> item.vertex >> item.opinion)) {
+            throw std::runtime_error("Не удалось прочитать ручные начальные мнения в " + source);
+        }
+    }
+    return manual;
+}
+
+od::model::ChoiceRule readChoiceRule(std::istream& in, const std::string& source) {
+    std::string name;
+    if (!(in >> name)) {
+        throw std::runtime_error("Не удалось прочитать правило выбора в " + source);
+    }
+    std::optional<od::model::ChoiceRule> rule = od::model::choiceRuleFromString(name);
+    if (!rule.has_value()) {
+        throw std::runtime_error("Неизвестное правило выбора '" + name + "' в " + source);
+    }
+    return *rule;
+}
+
+std::vector<int> readPopularity(std::istream& in, const std::string& source) {
+    int count = 0;
+    if (!(in >> count) || count < 0 || count > od::model::MAX_OPINIONS) {
+        throw std::runtime_error("Не удалось прочитать список популярности в " + source);
+    }
+    std::vector<int> popularity(static_cast<size_t>(count));
+    for (int& opinion : popularity) {
+        if (!(in >> opinion)) {
+            throw std::runtime_error("Не удалось прочитать список популярности в " + source);
+        }
+    }
+    return popularity;
+}
+
+struct LegacyLinear {
+    bool hasA = false;
+    bool hasB = false;
+    double a = 0.0;
+    double b = 0.0;
+
+    bool present() const {
+        return hasA || hasB;
+    }
+
+    od::model::ProbabilityFunction toFunction() const {
+        od::model::ProbabilityFunction function;
+        function.kind = od::model::FunctionKind::Linear;
+        function.params = {a, b};
+        return function;
+    }
+};
+
+bool readFlag(std::istream& in) {
+    int value = 0;
+    in >> value;
+    return value != 0;
+}
+
+void readParamsSection(std::istream& file, SimulationParams& params, const std::string& filename) {
+    bool hasAddFunction = false;
+    bool hasRemoveFunction = false;
+    bool hasOpinionFunction = false;
+    std::optional<double> legacyK1;
+    std::optional<double> legacyK2;
+    LegacyLinear legacyAdd;
+    LegacyLinear legacyRemove;
 
     std::string token;
     while (file >> token) {
-        if (token == "PARAMS") {
-            paramsLoaded = true;
-            break;
+        if (token == "SEED") {
+            file >> params.seed;
+        } else if (token == "T_MAX") {
+            file >> params.tMax;
+        } else if (token == "NUM_OPINIONS") {
+            file >> params.numOpinions;
+        } else if (token == "OPINION_FUNCTION") {
+            params.opinionFunction = readOpinionFunction(file, filename);
+            hasOpinionFunction = true;
+        } else if (token == "CHOICE_RULE") {
+            params.choiceRule = readChoiceRule(file, filename);
+        } else if (token == "POPULARITY") {
+            params.popularity = readPopularity(file, filename);
+        } else if (token == "INITIAL_REGULAR") {
+            params.initialOpinions.regular = readInitialGroup(file, filename);
+        } else if (token == "INITIAL_STUBBORN") {
+            params.initialOpinions.stubborn = readInitialGroup(file, filename);
+        } else if (token == "INITIAL_MANUAL") {
+            params.initialOpinions.manual = readManualOpinions(file, filename);
+        } else if (token == "K1") {
+            double value = 0.0;
+            file >> value;
+            legacyK1 = value;
+        } else if (token == "K2") {
+            double value = 0.0;
+            file >> value;
+            legacyK2 = value;
+        } else if (token == "USE_WEIGHTS") {
+            params.useWeights = readFlag(file);
+        } else if (token == "DYNAMIC_EDGES") {
+            params.dynamicEdges = readFlag(file);
+        } else if (token == "REMOVE_EDGES") {
+            params.removeEdges = readFlag(file);
+        } else if (token == "ADD_FUNCTION") {
+            params.edgeAddFunction = readFunction(file, filename);
+            hasAddFunction = true;
+        } else if (token == "REMOVE_FUNCTION") {
+            params.edgeRemoveFunction = readFunction(file, filename);
+            hasRemoveFunction = true;
+        } else if (token == "P0") {
+            file >> legacyAdd.a;
+            legacyAdd.hasA = true;
+        } else if (token == "K") {
+            file >> legacyAdd.b;
+            legacyAdd.hasB = true;
+        } else if (token == "REMOVE_P0") {
+            file >> legacyRemove.a;
+            legacyRemove.hasA = true;
+        } else if (token == "REMOVE_K") {
+            file >> legacyRemove.b;
+            legacyRemove.hasB = true;
         }
     }
 
-    if (paramsLoaded) {
-        readParamsSection(file, params, filename);
+    if (!hasOpinionFunction && (legacyK1.has_value() || legacyK2.has_value())) {
+        params.opinionFunction = od::model::thresholdFunction(legacyK1.value_or(0.0), legacyK2.value_or(1.0));
+    }
+    if (!hasAddFunction && legacyAdd.present()) {
+        params.edgeAddFunction = legacyAdd.toFunction();
+    }
+    if (!hasRemoveFunction && legacyRemove.present()) {
+        params.edgeRemoveFunction = legacyRemove.toFunction();
+    }
+}
+
+} // namespace
+
+GraphFile loadGraphFile(const std::string& filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("loadGraph: не удалось открыть файл: " + filename);
     }
 
-    return graph;
+    GraphFile result;
+    result.graph = readGraphBody(file, filename);
+
+    std::string token;
+    if (!(file >> token)) {
+        return result;
+    }
+    if (token == "OPINIONS") {
+        result.opinions = readOpinions(file, result.graph.getNumVertices(), filename);
+        if (!(file >> token)) {
+            return result;
+        }
+    }
+    if (token != "PARAMS") {
+        throw std::runtime_error("loadGraph: в файле " + filename + " после рёбер ожидалась секция OPINIONS "
+                                 "или PARAMS, получен '" + token + "'");
+    }
+    result.paramsLoaded = true;
+    readParamsSection(file, result.params, filename);
+    return result;
 }
 
 } // namespace od::io

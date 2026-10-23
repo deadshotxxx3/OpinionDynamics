@@ -1,5 +1,4 @@
 #include "od/io/SimulationLog.hpp"
-#include "od/io/GraphIO.hpp"
 
 #include <fstream>
 #include <iomanip>
@@ -11,29 +10,20 @@ namespace od::io {
 namespace {
 
 void writeParams(std::ofstream& file, const SimulationLog& log) {
-    file << "SEED " << log.seed << "\n";
-    file << "T_MAX " << log.tMax << "\n";
-    file << "OPINION_FUNCTION ";
-    writeOpinionFunction(file, log.opinionFunction);
+    writeParamsLines(file, log.params);
     file << "\n";
-    file << "USE_WEIGHTS " << (log.useWeights ? 1 : 0) << "\n";
-    file << "DYNAMIC_EDGES " << (log.dynamicEdges ? 1 : 0) << "\n";
-    file << "ADD_FUNCTION ";
-    writeFunction(file, log.edgeAddFunction);
-    file << "\n";
-    file << "REMOVE_EDGES " << (log.removeEdges ? 1 : 0) << "\n";
-    file << "REMOVE_FUNCTION ";
-    writeFunction(file, log.edgeRemoveFunction);
-    file << "\n\n";
-
     file << "INITIAL_GRAPH_FILE " << log.initialGraphFile << "\n";
     file << "FINAL_GRAPH_FILE " << log.finalGraphFile << "\n\n";
 }
 
 void writeHistory(std::ofstream& file, const SimulationLog& log) {
-    file << "HISTORY " << log.history.size() << "\n";
-    for (const auto& rec : log.history) {
-        file << rec.ones << " " << rec.edges << "\n";
+    file << "OPINION_HISTORY " << log.history.size() << "\n";
+    for (const StepRecord& record : log.history) {
+        file << record.edges << " " << record.counts.size();
+        for (const od::model::OpinionCount& item : record.counts) {
+            file << " " << item.opinion << " " << item.count;
+        }
+        file << "\n";
     }
     file << "\n";
 }

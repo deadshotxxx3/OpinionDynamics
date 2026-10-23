@@ -23,9 +23,14 @@ void askStepsAndSeed(RuntimeParams& params) {
     }
 }
 
-RuntimeParams askAllParams() {
+RuntimeParams askAllParams(const od::graph::Graph& graph) {
+    bool hasStubborn = false;
+    for (int v = 0; v < graph.getNumVertices() && !hasStubborn; ++v) {
+        hasStubborn = graph.isStubborn(v);
+    }
+
     ManualGenConfig model;
-    collectOpinionModelSettings(model);
+    collectOpinionModelSettings(model, hasStubborn);
     collectDynamicEdgesSettings(model);
 
     RuntimeParams params = paramsFromConfig(model);
@@ -38,7 +43,7 @@ void printLoadedParams(const RuntimeParams& params) {
               << "  seed = " << params.seed << "\n"
               << "  T_MAX = " << params.tMax << "\n"
               << "  веса: " << (params.useWeights ? "учитываются" : "не учитываются") << "\n";
-    printOpinionFunction(params, "  ");
+    printOpinionModel(params, "  ");
     printEdgeDynamics(params, "  ");
 }
 
@@ -57,7 +62,7 @@ SimulationSetup generateNewGraph() {
     askStepsAndSeed(params);
     ensureSeed(params);
 
-    return SimulationSetup{od::graph::generateGraph(config, params.seed), params};
+    return SimulationSetup{od::graph::generateGraph(config, params.seed), params, {}};
 }
 
 SimulationSetup loadSavedGraph() {
@@ -69,22 +74,25 @@ SimulationSetup loadSavedGraph() {
     bool initial = od::io::readIntUntilValid("Ввод: ", 1, 2) == 1;
     std::string filename = runDir + "/" + (initial ? "graph_initial.txt" : "graph_final.txt");
 
-    od::io::SimulationParams fileParams;
-    bool paramsLoaded = false;
-    od::graph::Graph graph = od::io::loadGraphWithParams(filename, fileParams, paramsLoaded);
+    od::io::GraphFile file = od::io::loadGraphFile(filename);
     std::cout << "Граф успешно загружен из " << filename << "\n\n";
 
-    if (!paramsLoaded) {
+    if (!file.paramsLoaded) {
         std::cout << "В файле нет сохранённых параметров - введите их вручную.\n";
-        return SimulationSetup{std::move(graph), askAllParams()};
+        RuntimeParams params = askAllParams(file.graph);
+        return SimulationSetup{std::move(file.graph), params, {}};
     }
 
-    RuntimeParams loaded = paramsFromFile(fileParams);
+    RuntimeParams loaded = paramsFromFile(file.params);
     printLoadedParams(loaded);
-    if (od::io::readYesNo("Использовать эти параметры? (y - да, n - ввести свои): ")) {
-        return SimulationSetup{std::move(graph), loaded};
+    if (!file.opinions.empty()) {
+        std::cout << "  мнения вершин сохранены в файле и будут взяты оттуда\n";
     }
-    return SimulationSetup{std::move(graph), askAllParams()};
+    if (od::io::readYesNo("Использовать эти параметры? (y - да, n - ввести свои): ")) {
+        return SimulationSetup{std::move(file.graph), loaded, std::move(file.opinions)};
+    }
+    RuntimeParams params = askAllParams(file.graph);
+    return SimulationSetup{std::move(file.graph), params, {}};
 }
 
 } // namespace

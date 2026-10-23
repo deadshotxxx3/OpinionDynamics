@@ -1,17 +1,18 @@
 #pragma once
 
+#include "od/io/GraphIO.hpp"
+#include "od/model/DynamicsModel.hpp"
 #include "od/model/EdgeEvolution.hpp"
-#include "od/model/OpinionFunction.hpp"
-#include "od/model/ProbabilityFunction.hpp"
 
 #include <string>
 #include <vector>
 
 namespace od::io {
 
+/// @brief Состояние после одного шага: число рёбер и сколько вершин держат каждое мнение.
 struct StepRecord {
-    int ones;
     long long edges;
+    std::vector<od::model::OpinionCount> counts; ///< Только мнения, которые есть у вершин, от самого частого.
 };
 
 struct OpinionChange {
@@ -21,15 +22,15 @@ struct OpinionChange {
     int to;
 };
 
+/**
+ * @brief Всё, что пишется в `simulation_log.txt`.
+ *
+ * Формат: строки PARAMS (как в файле графа), ссылки на файлы графов, затем секции
+ * `OPINION_HISTORY` (на каждом шаге: число рёбер, число мнений и пары «мнение число_вершин»),
+ * `OPINION_CHANGES`, `EDGE_EVENTS` и `FINAL_OPINIONS`.
+ */
 struct SimulationLog {
-    unsigned int seed = 0;
-    int tMax = 0;
-    od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction();
-    bool useWeights = false;
-    bool dynamicEdges = false;
-    od::model::ProbabilityFunction edgeAddFunction;
-    bool removeEdges = false;
-    od::model::ProbabilityFunction edgeRemoveFunction;
+    SimulationParams params;
 
     std::string initialGraphFile;
     std::string finalGraphFile;

@@ -10,6 +10,7 @@ BINARY_PATH_DEFAULT = "../build/opinion_dynamics"
 VISUALIZE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "visualize.py")
 VISUALIZE_CHECK_DELAY_MS = 3000
 LABEL_WIDTH = 28
+MAX_OPINIONS = 10000
 
 EDGE_FUNCTIONS = [
     ("constant", "Константная", "p = a", "a", 1, "0.01"),
@@ -26,7 +27,8 @@ EDGE_FUNCTIONS = [
 
 OPINION_FUNCTIONS = [
     ("threshold", "Пороговая", "0 при s ≤ k1, (s − k1)/(k2 − k1) до k2, 1 после", "k1, k2", 2, "0.05, 0.5"),
-    ("moran", "Моран", "g = (1 + δ)·s, мнение 1 копируется в 1+δ раз охотнее", "δ ≥ −1", 1, "0.5"),
+    ("moran", "Моран", "g = (1 + δ)·s у мнения-мутанта, s у остальных", "δ ≥ −1[, мутант = 1]",
+     (1, 2), "0.5"),
     ("polynomial", "Полиномиальная", "g = a·sⁿ + b·sⁿ⁻¹ + … + свободный член",
      "коэффициенты от старшей степени", -1, "1, 0, 0"),
     ("exponential", "Экспоненциальная", "g = a·e^(b·s)", "a, b", 2, "1, 5"),
@@ -47,12 +49,52 @@ OPINION_TABLE = FunctionTable(OPINION_FUNCTIONS)
 COMBOBOX_WIDTH = max(len(d) for d in EDGE_TABLE.displays + OPINION_TABLE.displays) + 2
 
 
-def check_opinion_params(name, params):
+def check_opinion_params(name, params, num_opinions):
     if name == "threshold" and not (0.0 <= params[0] < params[1] <= 1.0):
         return "пороги должны удовлетворять 0 ≤ k1 < k2 ≤ 1"
     if name == "moran" and params[0] < -1.0:
         return "у Морана должно быть δ ≥ −1"
+    if name == "moran" and len(params) == 2:
+        mutant = params[1]
+        if mutant != int(mutant) or not 0 <= mutant < num_opinions:
+            return f"мнение-мутант должно быть целым от 0 до {num_opinions - 1}"
     return ""
+
+
+def parse_int_list(text, title):
+    values = [v.strip() for v in text.split(",") if v.strip()]
+    try:
+        return [int(v) for v in values]
+    except ValueError:
+        raise ValueError(f"{title}: нужны целые числа через запятую")
+
+
+def check_opinion(value, num_opinions, title):
+    if not 0 <= value < num_opinions:
+        raise ValueError(f"{title}: мнение {value} вне диапазона 0..{num_opinions - 1}")
+
+
+def parse_manual_opinions(text, num_opinions, total_vertices=None):
+    title = "Начальные мнения вручную"
+    pairs = []
+    seen = set()
+    for item in [v.strip() for v in text.split(",") if v.strip()]:
+        parts = item.split(":")
+        try:
+            vertex, opinion = int(parts[0]), int(parts[1])
+            if len(parts) != 2:
+                raise ValueError
+        except (ValueError, IndexError):
+            raise ValueError(f"{title}: нужно вершина:мнение через запятую, например 0:2,5:1")
+        if vertex < 0 or (total_vertices is not None and vertex >= total_vertices):
+            limit = f"0..{total_vertices - 1}" if total_vertices is not None else "от 0"
+            raise ValueError(f"{title}: вершины {vertex} нет в графе, допустимые номера {limit}")
+        if vertex in seen:
+            raise ValueError(f"{title}: вершина {vertex} указана дважды")
+        seen.add(vertex)
+        check_opinion(opinion, num_opinions, title)
+        pairs.append(f"{vertex}:{opinion}")
+    return ",".join(pairs)
 
 
 class SimulationForm:
@@ -77,6 +119,10 @@ class SimulationForm:
         self.use_weights_var = tk.BooleanVar(value=False)
         self.load_weights_var = tk.StringVar(value="file")
         self.load_opinion_var = tk.BooleanVar(value=False)
+        self.load_model_var = tk.BooleanVar(value=False)
+        self.load_initial_var = tk.BooleanVar(value=False)
+        self.choice_vars = {}
+        self.initial_mode_vars = {}
 
         self.generate_frame = None
         self.load_frame = None
@@ -207,8 +253,11 @@ class SimulationForm:
         basics = ttk.LabelFrame(parent, text="Параметры мнений")
         basics.pack(fill="x", padx=10, pady=6)
 
+        self.add_entry(basics, "gen_num_opinions", "Число мнений (2..10000)", "2")
         self.build_function_group(
             basics, "gen_opinion", "Функция изменения мнений", None, "threshold", OPINION_TABLE)
+        self.build_choice_group(basics, "gen", "Выбор нового мнения", None)
+        self.build_initial_group(basics, "gen", "Начальные мнения", None)
         self.add_entry(basics, "gen_tmax", "Количество шагов", "500")
         self.add_entry(basics, "gen_seed", "Seed (пусто = случайный)", "")
 
@@ -293,6 +342,9 @@ class SimulationForm:
         self.build_function_group(
             override_frame, "load_opinion", "Функция изменения мнений", self.load_opinion_var,
             "threshold", OPINION_TABLE, checkbox_text="Переопределить (иначе из файла)")
+        self.build_choice_group(override_frame, "load", "Число мнений и выбор нового мнения",
+                                self.load_model_var)
+        self.build_initial_group(override_frame, "load", "Начальные мнения", self.load_initial_var)
         self.add_entry(override_frame, "load_tmax", "Количество шагов", "")
         self.add_entry(override_frame, "load_seed", "Seed", "")
 
@@ -310,6 +362,73 @@ class SimulationForm:
         ).pack(side="left")
 
         self.load_frame = outer
+
+    def build_choice_group(self, parent, prefix, title, enabled_var):
+        group = ttk.LabelFrame(parent, text=title)
+        group.pack(fill="x", padx=6, pady=4)
+
+        if enabled_var is not None:
+            ttk.Checkbutton(
+                group, text="Переопределить (иначе из файла)", variable=enabled_var
+            ).pack(anchor="w", padx=6)
+            self.add_entry(group, f"{prefix}_num_opinions", "Число мнений (2..10000)", "2")
+
+        choice_var = tk.StringVar(value="max")
+        self.choice_vars[prefix] = choice_var
+        row = ttk.Frame(group)
+        row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(row, text="Правило", width=LABEL_WIDTH).pack(side="left")
+        ttk.Radiobutton(row, text="Максимум", variable=choice_var, value="max").pack(side="left")
+        ttk.Radiobutton(
+            row, text="Пропорционально", variable=choice_var, value="proportional"
+        ).pack(side="left", padx=(8, 0))
+
+        ttk.Label(
+            group,
+            text=(
+                "Максимум: кандидат с наибольшей P, переход в него с вероятностью P.\n"
+                "Пропорционально: мнение выбирается случайно с вероятностью P."
+            ),
+            foreground="gray",
+        ).pack(anchor="w", padx=6)
+        self.add_entry(group, f"{prefix}_popularity", "Популярность для ничьих", "")
+        ttk.Label(
+            group,
+            text="Мнения от самого популярного, например 5, 3, 2. Пусто — ничьи случайно.",
+            foreground="gray",
+        ).pack(anchor="w", padx=6, pady=(0, 2))
+
+    def build_initial_row(self, parent, prefix, kind, label, default_value):
+        mode_var = tk.StringVar(value="constant")
+        self.initial_mode_vars[f"{prefix}_{kind}"] = mode_var
+
+        row = ttk.Frame(parent)
+        row.pack(fill="x", padx=6, pady=2)
+        ttk.Label(row, text=label, width=LABEL_WIDTH).pack(side="left")
+        ttk.Radiobutton(row, text="Мнение", variable=mode_var, value="constant").pack(side="left")
+        entry = ttk.Entry(row, width=8)
+        entry.insert(0, default_value)
+        entry.pack(side="left", padx=(2, 8))
+        self.fields[f"{prefix}_init_{kind}"] = entry
+        ttk.Radiobutton(row, text="Случайно", variable=mode_var, value="random").pack(side="left")
+
+    def build_initial_group(self, parent, prefix, title, enabled_var):
+        group = ttk.LabelFrame(parent, text=title)
+        group.pack(fill="x", padx=6, pady=4)
+
+        if enabled_var is not None:
+            ttk.Checkbutton(
+                group, text="Задать заново (иначе из файла графа)", variable=enabled_var
+            ).pack(anchor="w", padx=6)
+
+        self.build_initial_row(group, prefix, "regular", "Обычные вершины", "0")
+        self.build_initial_row(group, prefix, "stubborn", "Упрямые вершины", "1")
+        self.add_entry(group, f"{prefix}_init_manual", "Вручную (вершина:мнение)", "")
+        ttk.Label(
+            group,
+            text="Например 0:2, 5:1 — перекрывает мнения групп. Пусто — не нужно.",
+            foreground="gray",
+        ).pack(anchor="w", padx=6, pady=(0, 2))
 
     def build_dynamic_edges_section(self):
         frame = ttk.LabelFrame(self.scrollable_parent, text="Динамика рёбер")
@@ -573,7 +692,7 @@ class SimulationForm:
         args += self.build_dynamic_edges_args()
         return args, seed
 
-    def read_function(self, prefix, title):
+    def read_function(self, prefix, title, num_opinions=2):
         table = self.function_tables[prefix]
         name, hint, expected, _ = table.by_display[self.function_vars[prefix].get()]
         raw = self.get_value(f"{prefix}_params")
@@ -586,28 +705,74 @@ class SimulationForm:
         if any(math.isnan(p) or math.isinf(p) for p in params):
             raise ValueError(f"{title}: параметры должны быть конечными числами")
 
+        allowed = expected if isinstance(expected, tuple) else (expected,)
         if expected == -1 and len(params) < 1:
             raise ValueError(f"{title}: нужен хотя бы один коэффициент ({hint})")
-        if expected != -1 and len(params) != expected:
+        if expected != -1 and len(params) not in allowed:
+            counts = " или ".join(str(c) for c in allowed)
             raise ValueError(
-                f"{title}: нужно параметров {expected} ({hint}), указано {len(params)}"
+                f"{title}: нужно параметров {counts} ({hint}), указано {len(params)}"
             )
 
         if table is OPINION_TABLE:
-            error = check_opinion_params(name, params)
+            error = check_opinion_params(name, params, num_opinions)
             if error:
                 raise ValueError(f"{title}: {error}")
 
         return name, params
 
-    def parse_function_params(self, prefix, title):
-        name, _ = self.read_function(prefix, title)
+    def parse_function_params(self, prefix, title, num_opinions=2):
+        name, _ = self.read_function(prefix, title, num_opinions)
         values = [v.strip() for v in self.get_value(f"{prefix}_params").split(",") if v.strip()]
         return name, ",".join(values)
 
-    def build_opinion_args(self, prefix):
-        name, params = self.parse_function_params(prefix, "Функция изменения мнений")
+    def build_opinion_args(self, prefix, num_opinions):
+        name, params = self.parse_function_params(prefix, "Функция изменения мнений", num_opinions)
         return ["--opinion-func", name, "--opinion-params", params]
+
+    def read_num_opinions(self, prefix):
+        raw = self.get_value(f"{prefix}_num_opinions")
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ValueError("Число мнений должно быть целым числом")
+        if not 2 <= value <= MAX_OPINIONS:
+            raise ValueError(f"Число мнений должно быть от 2 до {MAX_OPINIONS}")
+        return value
+
+    def build_choice_args(self, prefix, num_opinions):
+        title = "Популярность"
+        popularity = parse_int_list(self.get_value(f"{prefix}_popularity"), title)
+        for opinion in popularity:
+            check_opinion(opinion, num_opinions, title)
+        if len(set(popularity)) != len(popularity):
+            raise ValueError(f"{title}: мнения не должны повторяться")
+        return [
+            "--num-opinions", str(num_opinions),
+            "--choice-rule", self.choice_vars[prefix].get(),
+            "--popularity", ",".join(str(p) for p in popularity),
+        ]
+
+    def read_initial_value(self, prefix, kind, title, num_opinions):
+        if self.initial_mode_vars[f"{prefix}_{kind}"].get() == "random":
+            return "random"
+        raw = self.get_value(f"{prefix}_init_{kind}")
+        try:
+            value = int(raw)
+        except ValueError:
+            raise ValueError(f"{title}: нужен номер мнения или «Случайно»")
+        check_opinion(value, num_opinions, title)
+        return str(value)
+
+    def build_initial_args(self, prefix, num_opinions, total_vertices=None):
+        args = [
+            "--initial-regular",
+            self.read_initial_value(prefix, "regular", "Начальное мнение обычных вершин", num_opinions),
+            "--initial-stubborn",
+            self.read_initial_value(prefix, "stubborn", "Начальное мнение упрямых вершин", num_opinions),
+        ]
+        manual = parse_manual_opinions(self.get_value(f"{prefix}_init_manual"), num_opinions, total_vertices)
+        return args + ["--initial-opinions", manual]
 
     def build_dynamic_edges_args(self):
         if not self.dynamic_edges_var.get():
@@ -705,6 +870,12 @@ class SimulationForm:
 
         return args
 
+    def attach_count(self):
+        try:
+            return max(int(self.get_value("attach_count") or 0), 0)
+        except ValueError:
+            return 0
+
     def build_generate_args(self):
         args = self.build_levels_args()
         total_vertices = self.total_level_vertices()
@@ -718,7 +889,11 @@ class SimulationForm:
         if not tmax:
             raise ValueError("Заполните количество шагов")
 
-        args += self.build_opinion_args("gen_opinion")
+        num_opinions = self.read_num_opinions("gen")
+        graph_vertices = total_vertices + self.attach_count()
+        args += self.build_opinion_args("gen_opinion", num_opinions)
+        args += self.build_choice_args("gen", num_opinions)
+        args += self.build_initial_args("gen", num_opinions, graph_vertices)
         args += ["--tmax", tmax]
 
         if self.use_weights_var.get():
@@ -746,8 +921,13 @@ class SimulationForm:
     def build_load_args(self):
         args = ["--load-dir", self.resolve_load_dir(), "--load-graph", self.load_graph_var.get()]
 
+        num_opinions = self.read_num_opinions("load") if self.load_model_var.get() else None
         if self.load_opinion_var.get():
-            args += self.build_opinion_args("load_opinion")
+            args += self.build_opinion_args("load_opinion", num_opinions or MAX_OPINIONS)
+        if num_opinions is not None:
+            args += self.build_choice_args("load", num_opinions)
+        if self.load_initial_var.get():
+            args += self.build_initial_args("load", num_opinions or MAX_OPINIONS)
 
         tmax = self.get_value("load_tmax")
         if tmax:

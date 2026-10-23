@@ -4,10 +4,14 @@
 #include "od/io/SimulationLog.hpp"
 #include "od/model/DynamicsModel.hpp"
 #include "od/model/EdgeEvolution.hpp"
+#include "od/model/InitialOpinions.hpp"
 
 #include <filesystem>
 #include <iostream>
 #include <random>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace od::model {
@@ -46,14 +50,26 @@ int countStubborn(const od::graph::Graph& graph) {
     return count;
 }
 
-int countOnes(const std::vector<int>& opinions) {
-    int count = 0;
-    for (int opinion : opinions) {
-        if (opinion == 1) {
-            ++count;
-        }
+const size_t SUMMARY_OPINIONS = 5;
+
+std::string describeLeader(const std::vector<OpinionCount>& counts, int numVertices) {
+    if (counts.empty()) {
+        return "вершин нет";
     }
-    return count;
+    return "мнений " + std::to_string(counts.size()) + ", чаще всего " + std::to_string(counts.front().opinion)
+           + " у " + std::to_string(counts.front().count) + " из " + std::to_string(numVertices) + " вершин";
+}
+
+std::string describeCounts(const std::vector<OpinionCount>& counts) {
+    std::string text;
+    for (size_t i = 0; i < counts.size() && i < SUMMARY_OPINIONS; ++i) {
+        if (i > 0) text += ", ";
+        text += std::to_string(counts[i].opinion) + " - " + std::to_string(counts[i].count);
+    }
+    if (counts.size() > SUMMARY_OPINIONS) {
+        text += " и ещё " + std::to_string(counts.size() - SUMMARY_OPINIONS) + " мнений";
+    }
+    return text;
 }
 
 void printGraphStats(const od::graph::Graph& graph) {
@@ -73,20 +89,13 @@ void printParams(const RuntimeParams& params, const std::string& runDir) {
               << "Папка прогона: " << runDir << "\n"
               << "T_MAX = " << params.tMax << "\n"
               << "Веса рёбер: " << (params.useWeights ? "учитываются" : "не учитываются") << "\n";
-    od::config::printOpinionFunction(params, "");
+    od::config::printOpinionModel(params, "");
     od::config::printEdgeDynamics(params, "");
 }
 
 od::io::SimulationLog createLog(const RuntimeParams& params, const RunFiles& files) {
     od::io::SimulationLog log;
-    log.seed = params.seed;
-    log.tMax = params.tMax;
-    log.opinionFunction = params.opinionFunction;
-    log.useWeights = params.useWeights;
-    log.dynamicEdges = params.dynamicEdges;
-    log.edgeAddFunction = params.edgeAddFunction;
-    log.removeEdges = params.removeEdges;
-    log.edgeRemoveFunction = params.edgeRemoveFunction;
+    log.params = od::config::toFileParams(params);
     log.initialGraphFile = files.initialGraph;
     log.finalGraphFile = files.finalGraph;
     log.history.reserve(static_cast<size_t>(params.tMax));
@@ -117,22 +126,21 @@ bool shouldPrintStep(int t, int tMax) {
 }
 
 void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions, const RuntimeParams& params,
-                    const OpinionRule& rule, int t, std::mt19937& rng, od::io::SimulationLog& log) {
+                    OpinionUpdater& updater, int t, std::mt19937& rng, od::io::SimulationLog& log) {
     const int step = t + 1;
 
     evolveEdgesAt(graph, params, t, rng, log);
 
-    std::vector<int> next = stepOpinions(graph, opinions, rule, params.useWeights, rng);
+    std::vector<int> next = updater.step(graph, opinions, rng);
     recordOpinionChanges(opinions, next, step, log);
     opinions = std::move(next);
 
-    int ones = countOnes(opinions);
-    log.history.push_back(od::io::StepRecord{ones, graph.getNumEdges()});
-
+    std::vector<OpinionCount> counts = countOpinions(opinions, params.numOpinions);
     if (shouldPrintStep(t, params.tMax)) {
-        std::cout << "Шаг " << step << ": мнение 1 у " << ones << " из " << graph.getNumVertices()
-                  << " вершин, рёбер " << graph.getNumEdges() << "\n";
+        std::cout << "Шаг " << step << ": " << describeLeader(counts, graph.getNumVertices())
+                  << ", рёбер " << graph.getNumEdges() << "\n";
     }
+    log.history.push_back(od::io::StepRecord{graph.getNumEdges(), std::move(counts)});
 }
 
 template <typename SaveAction>
@@ -145,37 +153,55 @@ void trySave(const std::string& what, const std::string& path, SaveAction save) 
     }
 }
 
+std::vector<int> prepareOpinions(const od::graph::Graph& graph, const RuntimeParams& params,
+                                 std::vector<int> given) {
+    if (given.empty()) {
+        return makeInitialOpinions(graph, params.initialOpinions, params.numOpinions, params.seed);
+    }
+    std::string error = validateOpinionVector(given, graph.getNumVertices(), params.numOpinions);
+    if (!error.empty()) {
+        throw std::invalid_argument("начальные мнения из файла не подходят: " + error
+                                    + ". Увеличьте число мнений или задайте начальные мнения заново");
+    }
+    std::cout << "Начальные мнения взяты из файла графа\n";
+    return given;
+}
+
 } // namespace
 
-void runSimulation(od::graph::Graph graph, RuntimeParams params) {
+void runSimulation(od::graph::Graph graph, RuntimeParams params, std::vector<int> initialOpinions) {
     od::config::ensureSeed(params);
     od::config::validateParams(params);
 
     printGraphStats(graph);
+    std::vector<int> opinions = prepareOpinions(graph, params, std::move(initialOpinions));
 
     const RunFiles files = createRunFiles(params.seed);
-    trySave("Начальный граф", files.initialGraph,
-            [&] { od::io::saveGraphWithParams(graph, od::config::toFileParams(params), files.initialGraph); });
+    trySave("Начальный граф", files.initialGraph, [&] {
+        od::io::saveGraphWithParams(graph, opinions, od::config::toFileParams(params), files.initialGraph);
+    });
 
-    std::vector<int> opinions = initOpinions(graph);
     printParams(params, files.dir);
+    std::cout << "Начало: " << describeCounts(countOpinions(opinions, params.numOpinions)) << "\n";
 
     od::io::SimulationLog log = createLog(params, files);
     std::mt19937 rng(params.seed);
-    const OpinionRule rule = makeRule(params.opinionFunction);
+    OpinionUpdater updater(makeRule(params.opinionFunction, params.numOpinions, params.choiceRule),
+                           ChoiceSettings{params.choiceRule, params.popularity}, params.useWeights);
 
     std::cout << "=== Симуляция ===\n";
     for (int t = 0; t < params.tMax; ++t) {
-        simulationStep(graph, opinions, params, rule, t, rng, log);
+        simulationStep(graph, opinions, params, updater, t, rng, log);
     }
 
+    const std::vector<OpinionCount> finalCounts = countOpinions(opinions, params.numOpinions);
     std::cout << "\n=== Итог ===\n"
-              << "После " << params.tMax << " шагов: мнение 1 у " << countOnes(opinions)
-              << " из " << graph.getNumVertices() << " вершин\n"
+              << "После " << params.tMax << " шагов: " << describeLeader(finalCounts, graph.getNumVertices()) << "\n"
+              << "Мнения по числу вершин: " << describeCounts(finalCounts) << "\n"
               << "Всего рёбер в графе: " << graph.getNumEdges() << "\n";
 
     log.finalOpinions = opinions;
-    trySave("Конечный граф", files.finalGraph, [&] { od::io::saveGraph(graph, files.finalGraph); });
+    trySave("Конечный граф", files.finalGraph, [&] { od::io::saveGraph(graph, opinions, files.finalGraph); });
     trySave("Лог симуляции", files.log, [&] { od::io::saveSimulationLog(log, files.log); });
 }
 

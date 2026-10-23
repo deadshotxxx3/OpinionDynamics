@@ -262,7 +262,7 @@ static od::model::OpinionFunction collectPolynomial(){
     return function;
 }
 
-od::model::OpinionFunction collectOpinionFunction(){
+od::model::OpinionFunction collectOpinionFunction(int numOpinions){
     od::model::OpinionFunction function;
     function.kind = chooseOpinionKind();
     if (function.kind == od::model::OpinionFunctionKind::Threshold) {
@@ -280,7 +280,7 @@ od::model::OpinionFunction collectOpinionFunction(){
             continue;
         }
         function.params = *values;
-        std::string error = od::model::validateOpinionFunction(function);
+        std::string error = od::model::validateOpinionSettings(function, {}, numOpinions);
         if (error.empty()) {
             break;
         }
@@ -290,8 +290,84 @@ od::model::OpinionFunction collectOpinionFunction(){
     return function;
 }
 
-void collectOpinionModelSettings(ManualGenConfig& cnf){
-    cnf.opinionFunction = collectOpinionFunction();
+static od::model::ChoiceRule chooseChoiceRule(){
+    std::cout << "Правило выбора нового мнения:\n"
+              << "  1 - максимум: кандидат с наибольшей P, переход в него с вероятностью P\n"
+              << "  2 - пропорционально: мнение выбирается случайно с вероятностью P\n";
+    return od::io::readIntUntilValid("Ввод: ", 1, 2) == 1
+        ? od::model::ChoiceRule::Max
+        : od::model::ChoiceRule::Proportional;
+}
+
+static std::vector<int> collectPopularity(int numOpinions){
+    const std::string prompt = "Популярность мнений через запятую, от самого популярного (0.."
+                               + std::to_string(numOpinions - 1) + ", пусто - ничьи случайно): ";
+    while (true) {
+        auto values = od::io::parseIntList(od::io::readLine(prompt));
+        if (!values.has_value()) {
+            std::cout << "Некорректные числа, повторите ввод\n";
+            continue;
+        }
+        std::string error = od::model::validatePopularity(*values, numOpinions);
+        if (error.empty()) {
+            return *values;
+        }
+        std::cout << error << "\n";
+    }
+}
+
+static od::model::InitialGroup collectInitialGroup(const std::string& title, int numOpinions){
+    std::cout << "Начальные мнения " << title << ":\n"
+              << "  1 - одинаковые у всех\n"
+              << "  2 - случайные (0.." << (numOpinions - 1) << ")\n";
+    if (od::io::readIntUntilValid("Ввод: ", 1, 2) == 2) {
+        return od::model::InitialGroup{true, 0};
+    }
+    int value = od::io::readIntUntilValid(
+        "Мнение (0.." + std::to_string(numOpinions - 1) + "): ", 0, numOpinions - 1);
+    return od::model::InitialGroup{false, value};
+}
+
+static std::vector<od::model::ManualOpinion> collectManualOpinions(int numOpinions){
+    if (!od::io::readYesNo("Задать мнения отдельных вершин вручную? Введите y/n: ")) {
+        return {};
+    }
+    while (true) {
+        auto manual = od::model::manualOpinionsFromString(
+            od::io::readLine("Пары вершина:мнение через запятую, например 0:2,5:1: "));
+        if (!manual.has_value()) {
+            std::cout << "Некорректная запись, нужно вершина:мнение через запятую\n";
+            continue;
+        }
+        od::model::InitialOpinionSettings check;
+        check.manual = *manual;
+        std::string error = od::model::validateInitialSettings(check, numOpinions);
+        if (error.empty()) {
+            return *manual;
+        }
+        std::cout << error << "\n";
+    }
+}
+
+static void collectInitialOpinions(ManualGenConfig& cnf, bool hasStubborn){
+    cnf.initialOpinions = od::model::InitialOpinionSettings{};
+    cnf.initialOpinions.regular = collectInitialGroup("обычных вершин", cnf.numOpinions);
+    if (hasStubborn) {
+        cnf.initialOpinions.stubborn = collectInitialGroup("упрямых вершин", cnf.numOpinions);
+    }
+    cnf.initialOpinions.manual = collectManualOpinions(cnf.numOpinions);
+}
+
+void collectOpinionModelSettings(ManualGenConfig& cnf, bool hasStubborn){
+    cnf.numOpinions = od::io::readIntUntilValid(
+        "Число мнений (2.." + std::to_string(od::model::MAX_OPINIONS) + "): ", 2, od::model::MAX_OPINIONS);
+    cnf.opinionFunction = collectOpinionFunction(cnf.numOpinions);
+    cnf.choiceRule = chooseChoiceRule();
+    cnf.popularity.clear();
+    if (cnf.choiceRule == od::model::ChoiceRule::Max) {
+        cnf.popularity = collectPopularity(cnf.numOpinions);
+    }
+    collectInitialOpinions(cnf, hasStubborn);
     cnf.useWeights = od::io::readYesNo(
         "Учитывать веса рёбер при изменении мнения? Введите y/n: ");
 }
@@ -336,7 +412,7 @@ ManualGenConfig collectGeneralGenConfig(){
 
     collectStubbornSettings(cnf);
     collectDynamicEdgesSettings(cnf);
-    collectOpinionModelSettings(cnf);
+    collectOpinionModelSettings(cnf, cnf.generateStubborn);
 
     return cnf;
 }
@@ -346,7 +422,7 @@ ManualGenConfig collectManualGenConfig(){
     collectLevels(cnf);
     collectStubbornSettings(cnf);
     collectDynamicEdgesSettings(cnf);
-    collectOpinionModelSettings(cnf);
+    collectOpinionModelSettings(cnf, cnf.generateStubborn);
     return cnf;
 }
 
@@ -447,10 +523,30 @@ static ValidationResult validateDynamicEdges(const ManualGenConfig& config){
     return {true, ""};
 }
 
+int countGraphVertices(const ManualGenConfig& config){
+    int total = countTotalVertices(config);
+    return config.generateStubborn ? total + config.stubbornAttach.count : total;
+}
+
 static ValidationResult validateOpinionModel(const ManualGenConfig& config){
-    std::string error = od::model::validateOpinionFunction(config.opinionFunction);
+    if (config.numOpinions < 2 || config.numOpinions > od::model::MAX_OPINIONS) {
+        return {false, "Число мнений должно быть от 2 до " + std::to_string(od::model::MAX_OPINIONS)};
+    }
+    std::string error = od::model::validateOpinionSettings(
+        config.opinionFunction, config.popularity, config.numOpinions);
+    if (error.empty()) {
+        error = od::model::validateInitialSettings(config.initialOpinions, config.numOpinions);
+    }
     if (!error.empty()) {
-        return {false, "Функция изменения мнений: " + error};
+        return {false, "Модель мнений: " + error};
+    }
+
+    const int totalVertices = countGraphVertices(config);
+    for (const od::model::ManualOpinion& item : config.initialOpinions.manual) {
+        if (item.vertex >= totalVertices) {
+            return {false, "Начальные мнения: вершины " + std::to_string(item.vertex)
+                               + " нет в графе, допустимые номера от 0 до " + std::to_string(totalVertices - 1)};
+        }
     }
     return {true, ""};
 }

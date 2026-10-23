@@ -112,6 +112,12 @@ const std::map<std::string, ValueHandler>& valueFlags() {
         {"--tmax", [](BatchArgs& a, const std::string& f, const std::string& v) { a.tMax = toInt(f, v); }},
         {"--opinion-func",   [](BatchArgs& a, const std::string&, const std::string& v) { a.opinionFunction = v; }},
         {"--opinion-params", [](BatchArgs& a, const std::string&, const std::string& v) { a.opinionParams = v; }},
+        {"--num-opinions",   [](BatchArgs& a, const std::string& f, const std::string& v) { a.numOpinions = toInt(f, v); }},
+        {"--choice-rule",    [](BatchArgs& a, const std::string&, const std::string& v) { a.choiceRule = v; }},
+        {"--initial-regular",  [](BatchArgs& a, const std::string&, const std::string& v) { a.initialRegular = v; }},
+        {"--initial-stubborn", [](BatchArgs& a, const std::string&, const std::string& v) { a.initialStubborn = v; }},
+        {"--initial-opinions", [](BatchArgs& a, const std::string&, const std::string& v) { a.initialManual = v; }},
+        {"--popularity",     [](BatchArgs& a, const std::string& f, const std::string& v) { a.popularity = toIntList(f, v); }},
         {"--seed", [](BatchArgs& a, const std::string& f, const std::string& v) { a.seed = toSeed(f, v); }},
 
         {"--stubborn-attach",         attachCount},
@@ -200,8 +206,19 @@ void printBatchUsage() {
               << "Функция изменения мнений (по умолчанию пороговая с k1 = 0, k2 = 1):\n"
               << "  --opinion-func NAME --opinion-params \"a,b,...\"\n"
               << "  или для пороговой коротко: --k1 X --k2 Y\n"
-              << "  например: --opinion-func moran --opinion-params 0.5\n"
+              << "  например: --opinion-func moran --opinion-params 0.5 (второй параметр - мнение-мутант, по умолчанию 1)\n"
               << "  у polynomial коэффициенты от старшей степени: \"3,2,1\" = 3s^2 + 2s + 1\n\n"
+              << "Число мнений (по умолчанию 2, мнения от 0 до N-1):\n"
+              << "  --num-opinions N (от 2 до " << od::model::MAX_OPINIONS << ")\n\n"
+              << "Правило выбора нового мнения (по умолчанию max):\n"
+              << "  --choice-rule max|proportional [--popularity \"5,3,2\"]\n"
+              << "  max - кандидат с наибольшей P, переход в него с вероятностью P;\n"
+              << "  proportional - мнение выбирается случайно с вероятностью P (как в старых прогонах);\n"
+              << "  --popularity решает ничьи в max (от самого популярного), без него ничьи случайны\n\n"
+              << "Начальные мнения (по умолчанию обычные 0, упрямые 1):\n"
+              << "  --initial-regular random|K --initial-stubborn random|K\n"
+              << "  --initial-opinions \"0:2,5:1\" (вершина:мнение, перекрывает группы)\n"
+              << "  при загрузке без этих флагов мнения берутся из файла графа, если они там есть\n\n"
               << "Опции:\n"
               << "  --use-weights | --no-weights\n"
               << "  --stubborn-attach N [--stubborn-attach-mode random|manual] [--stubborn-attach-targets 0,2,4]\n"
