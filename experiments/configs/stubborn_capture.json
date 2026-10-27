@@ -1,0 +1,20 @@
+{
+  "name": "stubborn_capture",
+  "binary": "../build/opinion_dynamics",
+  "seeds": 50,
+  "fixed": {
+    "vertices": 50,
+    "probability": 0.3,
+    "tmax": 500
+  },
+  "vary": {
+    "stubborn-assign": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
+    "choice-rule": ["proportional", "max"],
+    "function": [
+      {"label": "s", "opinion-func": "polynomial", "opinion-params": "1,0"},
+      {"label": "s^2", "opinion-func": "polynomial", "opinion-params": "1,0,0"},
+      {"label": "e^(5s)", "opinion-func": "exponential", "opinion-params": "1,5"},
+      {"label": "moran 0.5", "opinion-func": "moran", "opinion-params": "0.5"}
+    ]
+  }
+}

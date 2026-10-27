@@ -86,6 +86,7 @@ const std::map<std::string, SwitchHandler>& switchFlags() {
         {"--no-weights",    [](BatchArgs& a) { a.useWeights = false; }},
         {"--dynamic-edges", [](BatchArgs& a) { a.dynamicEdges = true; }},
         {"--remove-edges",  [](BatchArgs& a) { a.removeEdges = true; }},
+        {"--quiet",         [](BatchArgs& a) { a.quiet = true; }},
     };
     return flags;
 }
@@ -106,6 +107,10 @@ const std::map<std::string, ValueHandler>& valueFlags() {
 
         {"--load-dir",   [](BatchArgs& a, const std::string&, const std::string& v) { a.loadDir = v; a.generate = false; }},
         {"--load-graph", [](BatchArgs& a, const std::string& f, const std::string& v) { a.loadFinalGraph = toLoadFinal(f, v); }},
+        {"--runs-dir",   [](BatchArgs& a, const std::string& f, const std::string& v) {
+            if (od::io::trim(v).empty()) throw badValue(f, v, "непустой путь");
+            a.runsDir = v;
+        }},
 
         {"--k1",   [](BatchArgs& a, const std::string& f, const std::string& v) { a.k1 = toDouble(f, v); }},
         {"--k2",   [](BatchArgs& a, const std::string& f, const std::string& v) { a.k2 = toDouble(f, v); }},
@@ -221,6 +226,8 @@ void printBatchUsage() {
               << "  при загрузке без этих флагов мнения берутся из файла графа, если они там есть\n\n"
               << "Опции:\n"
               << "  --use-weights | --no-weights\n"
+              << "  --runs-dir DIR (куда складывать папки прогонов, по умолчанию runs)\n"
+              << "  --quiet (печатать только папку прогона и итог)\n"
               << "  --stubborn-attach N [--stubborn-attach-mode random|manual] [--stubborn-attach-targets 0,2,4]\n"
               << "  --stubborn-assign N [--stubborn-assign-mode random|manual] [--stubborn-assign-targets 1,3,5]\n"
               << "  --dynamic-edges --add-func NAME --add-params \"a,b,...\"\n"

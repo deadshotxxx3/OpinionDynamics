@@ -30,8 +30,8 @@ struct RunFiles {
     std::string log;
 };
 
-RunFiles createRunFiles(unsigned int seed) {
-    const std::string base = "runs/run_" + std::to_string(seed);
+RunFiles createRunFiles(const std::string& runsDir, unsigned int seed) {
+    const std::string base = runsDir + "/run_" + std::to_string(seed);
     std::string dir = base;
     for (int copy = 2; std::filesystem::exists(dir); ++copy) {
         dir = base + "_" + std::to_string(copy);
@@ -126,7 +126,7 @@ bool shouldPrintStep(int t, int tMax) {
 }
 
 void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions, const RuntimeParams& params,
-                    OpinionUpdater& updater, int t, std::mt19937& rng, od::io::SimulationLog& log) {
+                    OpinionUpdater& updater, int t, std::mt19937& rng, od::io::SimulationLog& log, bool quiet) {
     const int step = t + 1;
 
     evolveEdgesAt(graph, params, t, rng, log);
@@ -136,7 +136,7 @@ void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions, const R
     opinions = std::move(next);
 
     std::vector<OpinionCount> counts = countOpinions(opinions, params.numOpinions);
-    if (shouldPrintStep(t, params.tMax)) {
+    if (!quiet && shouldPrintStep(t, params.tMax)) {
         std::cout << "Шаг " << step << ": " << describeLeader(counts, graph.getNumVertices())
                   << ", рёбер " << graph.getNumEdges() << "\n";
     }
@@ -144,17 +144,19 @@ void simulationStep(od::graph::Graph& graph, std::vector<int>& opinions, const R
 }
 
 template <typename SaveAction>
-void trySave(const std::string& what, const std::string& path, SaveAction save) {
+void trySave(const std::string& what, const std::string& path, bool quiet, SaveAction save) {
     try {
         save();
-        std::cout << what << " сохранён в " << path << "\n";
+        if (!quiet) {
+            std::cout << what << " сохранён в " << path << "\n";
+        }
     } catch (const std::exception& e) {
         std::cout << "Ошибка: " << what << " не сохранён: " << e.what() << "\n";
     }
 }
 
 std::vector<int> prepareOpinions(const od::graph::Graph& graph, const RuntimeParams& params,
-                                 std::vector<int> given) {
+                                 std::vector<int> given, bool quiet) {
     if (given.empty()) {
         return makeInitialOpinions(graph, params.initialOpinions, params.numOpinions, params.seed);
     }
@@ -163,46 +165,62 @@ std::vector<int> prepareOpinions(const od::graph::Graph& graph, const RuntimePar
         throw std::invalid_argument("начальные мнения из файла не подходят: " + error
                                     + ". Увеличьте число мнений или задайте начальные мнения заново");
     }
-    std::cout << "Начальные мнения взяты из файла графа\n";
+    if (!quiet) {
+        std::cout << "Начальные мнения взяты из файла графа\n";
+    }
     return given;
 }
 
 } // namespace
 
-void runSimulation(od::graph::Graph graph, RuntimeParams params, std::vector<int> initialOpinions) {
+void runSimulation(od::graph::Graph graph, RuntimeParams params, std::vector<int> initialOpinions,
+                   const od::config::OutputOptions& output) {
+    const bool quiet = output.quiet;
     od::config::ensureSeed(params);
     od::config::validateParams(params);
 
-    printGraphStats(graph);
-    std::vector<int> opinions = prepareOpinions(graph, params, std::move(initialOpinions));
+    if (!quiet) {
+        printGraphStats(graph);
+    }
+    std::vector<int> opinions = prepareOpinions(graph, params, std::move(initialOpinions), quiet);
 
-    const RunFiles files = createRunFiles(params.seed);
-    trySave("Начальный граф", files.initialGraph, [&] {
+    const RunFiles files = createRunFiles(output.runsDir, params.seed);
+    trySave("Начальный граф", files.initialGraph, quiet, [&] {
         od::io::saveGraphWithParams(graph, opinions, od::config::toFileParams(params), files.initialGraph);
     });
 
-    printParams(params, files.dir);
-    std::cout << "Начало: " << describeCounts(countOpinions(opinions, params.numOpinions)) << "\n";
+    if (quiet) {
+        std::cout << "Папка прогона: " << files.dir << "\n";
+    } else {
+        printParams(params, files.dir);
+        std::cout << "Начало: " << describeCounts(countOpinions(opinions, params.numOpinions)) << "\n";
+    }
 
     od::io::SimulationLog log = createLog(params, files);
     std::mt19937 rng(params.seed);
     OpinionUpdater updater(makeRule(params.opinionFunction, params.numOpinions, params.choiceRule),
                            ChoiceSettings{params.choiceRule, params.popularity}, params.useWeights);
 
-    std::cout << "=== Симуляция ===\n";
+    if (!quiet) {
+        std::cout << "=== Симуляция ===\n";
+    }
     for (int t = 0; t < params.tMax; ++t) {
-        simulationStep(graph, opinions, params, updater, t, rng, log);
+        simulationStep(graph, opinions, params, updater, t, rng, log, quiet);
     }
 
     const std::vector<OpinionCount> finalCounts = countOpinions(opinions, params.numOpinions);
-    std::cout << "\n=== Итог ===\n"
-              << "После " << params.tMax << " шагов: " << describeLeader(finalCounts, graph.getNumVertices()) << "\n"
-              << "Мнения по числу вершин: " << describeCounts(finalCounts) << "\n"
-              << "Всего рёбер в графе: " << graph.getNumEdges() << "\n";
+    if (!quiet) {
+        std::cout << "\n=== Итог ===\n";
+    }
+    std::cout << "После " << params.tMax << " шагов: " << describeLeader(finalCounts, graph.getNumVertices()) << "\n";
+    if (!quiet) {
+        std::cout << "Мнения по числу вершин: " << describeCounts(finalCounts) << "\n"
+                  << "Всего рёбер в графе: " << graph.getNumEdges() << "\n";
+    }
 
     log.finalOpinions = opinions;
-    trySave("Конечный граф", files.finalGraph, [&] { od::io::saveGraph(graph, opinions, files.finalGraph); });
-    trySave("Лог симуляции", files.log, [&] { od::io::saveSimulationLog(log, files.log); });
+    trySave("Конечный граф", files.finalGraph, quiet, [&] { od::io::saveGraph(graph, opinions, files.finalGraph); });
+    trySave("Лог симуляции", files.log, quiet, [&] { od::io::saveSimulationLog(log, files.log); });
 }
 
 } // namespace od::model

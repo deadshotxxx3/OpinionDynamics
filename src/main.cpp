@@ -12,7 +12,8 @@ int main(int argc, char** argv) {
             ? od::config::setupBatch(od::config::parseBatchArgs(argc, argv))
             : od::config::setupInteractive();
 
-        od::model::runSimulation(std::move(setup.graph), setup.params, std::move(setup.initialOpinions));
+        od::model::runSimulation(std::move(setup.graph), setup.params, std::move(setup.initialOpinions),
+                                  setup.output);
     } catch (const od::config::UsageError& e) {
         std::cout << "Ошибка: " << e.what() << "\n\n";
         od::config::printBatchUsage();

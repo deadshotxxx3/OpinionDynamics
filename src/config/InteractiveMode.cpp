@@ -62,7 +62,7 @@ SimulationSetup generateNewGraph() {
     askStepsAndSeed(params);
     ensureSeed(params);
 
-    return SimulationSetup{od::graph::generateGraph(config, params.seed), params, {}};
+    return SimulationSetup{od::graph::generateGraph(config, params.seed), params, {}, {}};
 }
 
 SimulationSetup loadSavedGraph() {
@@ -80,7 +80,7 @@ SimulationSetup loadSavedGraph() {
     if (!file.paramsLoaded) {
         std::cout << "В файле нет сохранённых параметров - введите их вручную.\n";
         RuntimeParams params = askAllParams(file.graph);
-        return SimulationSetup{std::move(file.graph), params, {}};
+        return SimulationSetup{std::move(file.graph), params, {}, {}};
     }
 
     RuntimeParams loaded = paramsFromFile(file.params);
@@ -89,10 +89,10 @@ SimulationSetup loadSavedGraph() {
         std::cout << "  мнения вершин сохранены в файле и будут взяты оттуда\n";
     }
     if (od::io::readYesNo("Использовать эти параметры? (y - да, n - ввести свои): ")) {
-        return SimulationSetup{std::move(file.graph), loaded, std::move(file.opinions)};
+        return SimulationSetup{std::move(file.graph), loaded, std::move(file.opinions), {}};
     }
     RuntimeParams params = askAllParams(file.graph);
-    return SimulationSetup{std::move(file.graph), params, {}};
+    return SimulationSetup{std::move(file.graph), params, {}, {}};
 }
 
 } // namespace

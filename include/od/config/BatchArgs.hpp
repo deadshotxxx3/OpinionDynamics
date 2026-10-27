@@ -69,6 +69,9 @@ struct BatchArgs {
     std::optional<unsigned int> seed;
     std::optional<bool> useWeights;
 
+    std::string runsDir = "runs";           ///< Папка для папок прогонов.
+    bool quiet = false;                     ///< Печатать только папку прогона и итог.
+
     std::optional<bool> dynamicEdges;
     FunctionArgs addFunction;
     std::optional<bool> removeEdges;

@@ -18,6 +18,7 @@
   - [Batch-режим](#batch-режим)
 - [Результаты прогона](#результаты-прогона)
 - [Визуализация](#визуализация)
+- [Эксперименты](#эксперименты)
 - [Форматы файлов](#форматы-файлов)
 - [Подбор параметров](#подбор-параметров)
 
@@ -178,6 +179,11 @@ include/od/
 src/
     main.cpp                       точка входа: выбор режима и обработка ошибок
     config/ graph/ io/ model/      реализации модулей
+experiments/
+    sweep.py                       серийные прогоны по сетке параметров, метрики в results.csv
+    metrics.py                     метрики одного прогона по его файлам
+    plot.py                        графики средних с доверительными интервалами
+    configs/                       описания серий (JSON)
 visualization/
     run_simulation.py              форма запуска (tkinter)
     visualize.py                   просмотр прогона: граф по шагам или графики динамики
@@ -404,6 +410,8 @@ python run_simulation.py
 | `--stubborn-assign N` | назначить N существующих вершин упрямыми | `0` |
 | `--stubborn-assign-mode random\|manual` | способ выбора | `random` |
 | `--stubborn-assign-targets "i,j,…"` | вершины при ручном выборе | — |
+| `--runs-dir DIR` | папка, в которой создаются папки прогонов | `runs` |
+| `--quiet` | печатать только папку прогона и итог | выкл. |
 | `--dynamic-edges` | включить появление рёбер (нужны `--add-func` и `--add-params`) | выкл. |
 | `--add-func NAME`, `--add-params "a,b,…"` | функция появления рёбер | — |
 | `--remove-edges` | включить удаление рёбер (нужны `--remove-func` и `--remove-params`) | выкл. |
@@ -470,6 +478,63 @@ python visualize.py ../build/runs/run_42
   число различных мнений и число рёбер.
 
 Прогоны старых версий (без начальных мнений в файле и с бинарной историей) тоже читаются.
+
+## Эксперименты
+
+Серия прогонов описывается JSON-файлом в `experiments/configs/`: какие флаги общие, какие
+перебираются и сколько seed на каждую точку. `sweep.py` запускает все сочетания параллельно
+(по числу ядер), считает метрики и пишет одну строку на прогон в `results.csv`:
+
+```bash
+source venv/bin/activate
+cd experiments
+python sweep.py configs/stubborn_capture.json
+python plot.py results/stubborn_capture/results.csv \
+    --x stubborn_share --y captured --group function --panel choice-rule
+```
+
+Результаты попадают в `experiments/results/<имя серии>/` (папка не перезаписывается, повторный
+запуск создаёт `_2`, `_3`…), там же сохраняется копия конфига. Папки отдельных прогонов после
+подсчёта метрик удаляются, `--keep-runs` их оставляет, `--jobs N` задаёт число потоков.
+Seed идут подряд с `seed_start`, поэтому серия полностью воспроизводится.
+
+**Формат конфига:**
+
+```json
+{
+  "name": "stubborn_capture",
+  "binary": "../build/opinion_dynamics",
+  "seeds": 50,
+  "fixed": {"vertices": 50, "probability": 0.3, "tmax": 500},
+  "vary": {
+    "stubborn-assign": [0, 5, 10],
+    "choice-rule": ["proportional", "max"],
+    "function": [
+      {"label": "s", "opinion-func": "polynomial", "opinion-params": "1,0"},
+      {"label": "moran 0.5", "opinion-func": "moran", "opinion-params": "0.5"}
+    ]
+  }
+}
+```
+
+Ключи — имена флагов без `--`, `true` — флаг без значения (`"use-weights": true`).
+Если значение в `vary` — объект, это вариант из нескольких флагов сразу, в таблицу пишется его `label`.
+
+**Метрики** (столбцы `results.csv`):
+
+| Столбец | Что значит |
+|---|---|
+| `num_vertices`, `num_stubborn`, `stubborn_share` | размер графа, число и доля упрямых |
+| `distinct_initial`, `distinct_final` | сколько мнений в начале и в конце |
+| `consensus`, `consensus_step` | у всех вершин одно мнение (1/0) и первый такой шаг |
+| `winner`, `winner_share` | самое частое мнение в конце и его доля |
+| `stubborn_opinion`, `stubborn_opinion_share` | мнение упрямых (если у всех одинаковое) и его доля в конце |
+| `captured`, `capture90_step` | мнение упрямых у всех вершин (1/0); первый шаг, когда оно у 90% |
+
+`plot.py` усредняет метрику по seed: `--x` — столбец по горизонтали, `--y` — метрика, `--group` —
+разные линии, `--panel` — соседние панели. Для метрик из 0 и 1 интервал считается по Уилсону,
+для остальных — среднее ± 1.96 стандартной ошибки; пустые значения (например, `capture90_step`
+в прогонах без захвата) пропускаются, их число видно в столбце `n` таблицы, которую печатает скрипт.
 
 ## Форматы файлов
 

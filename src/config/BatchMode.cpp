@@ -190,7 +190,7 @@ SimulationSetup generate(const BatchArgs& args) {
     }
     ensureSeed(params);
 
-    return SimulationSetup{od::graph::generateGraph(config, params.seed), params, {}};
+    return SimulationSetup{od::graph::generateGraph(config, params.seed), params, {}, {}};
 }
 
 void applyOverrides(RuntimeParams& params, const BatchArgs& args) {
@@ -232,13 +232,15 @@ SimulationSetup load(const BatchArgs& args) {
     applyOverrides(params, args);
 
     std::vector<int> opinions = hasInitialOverrides(args) ? std::vector<int>{} : std::move(file.opinions);
-    return SimulationSetup{std::move(file.graph), params, std::move(opinions)};
+    return SimulationSetup{std::move(file.graph), params, std::move(opinions), {}};
 }
 
 } // namespace
 
 SimulationSetup setupBatch(const BatchArgs& args) {
-    return args.generate ? generate(args) : load(args);
+    SimulationSetup setup = args.generate ? generate(args) : load(args);
+    setup.output = OutputOptions{args.runsDir, args.quiet};
+    return setup;
 }
 
 } // namespace od::config

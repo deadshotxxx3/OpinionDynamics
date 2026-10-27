@@ -31,6 +31,12 @@ struct RuntimeParams {
     bool seedSpecified = false; ///< `false` — seed будет выбран случайно.
 };
 
+/// @brief Куда и как подробно выводить результаты прогона. На саму модель не влияет.
+struct OutputOptions {
+    std::string runsDir = "runs"; ///< Папка, в которой создаётся папка прогона `run_<seed>`.
+    bool quiet = false;           ///< Печатать только папку прогона и итог, без шагов и параметров.
+};
+
 /**
  * @brief Всё, что нужно для запуска: граф, параметры и, возможно, готовые начальные мнения.
  *
@@ -41,6 +47,7 @@ struct SimulationSetup {
     od::graph::Graph graph;
     RuntimeParams params;
     std::vector<int> initialOpinions;
+    OutputOptions output;
 };
 
 /// @brief Берёт параметры модели и динамики рёбер из конфигурации генерации.
