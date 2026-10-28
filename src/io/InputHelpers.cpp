@@ -1,6 +1,8 @@
 #include "od/io/InputHelpers.hpp"
 
+#include <algorithm>
 #include <cctype>
+#include <climits>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -65,6 +67,21 @@ std::optional<int> parseInt(const std::string& text) {
 
 std::optional<double> parseDouble(const std::string& text) {
     return parseWhole<double>(text, [](const std::string& s, size_t* pos) { return std::stod(s, pos); });
+}
+
+std::optional<unsigned int> parseSeed(const std::string& text) {
+    const std::string value = trim(text);
+    if (value.empty() || !std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isdigit(c); })) {
+        return std::nullopt;
+    }
+    try {
+        const unsigned long long seed = std::stoull(value);
+        if (seed <= UINT_MAX) {
+            return static_cast<unsigned int>(seed);
+        }
+    } catch (const std::out_of_range&) {
+    }
+    return std::nullopt;
 }
 
 std::optional<std::vector<int>> parseIntList(const std::string& csv) {
@@ -135,6 +152,17 @@ double readDoubleUntilValid(const std::string& prompt, double minVal, double max
         if (value.has_value()) {
             return *value;
         }
+    }
+}
+
+unsigned int readSeedUntilValid(const std::string& prompt) {
+    while (true) {
+        const std::string line = readLine(prompt);
+        std::optional<unsigned int> seed = parseSeed(line);
+        if (seed.has_value()) {
+            return *seed;
+        }
+        std::cerr << "Seed должен быть целым числом от 0 до " << UINT_MAX << ": '" << line << "'\n";
     }
 }
 

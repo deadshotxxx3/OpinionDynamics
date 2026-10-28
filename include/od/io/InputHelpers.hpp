@@ -18,6 +18,10 @@ std::optional<int> parseInt(const std::string& text);
 /// @return Число или `std::nullopt`, если строка не является числом.
 std::optional<double> parseDouble(const std::string& text);
 
+/// @brief Разбирает seed: целое от 0 до `UINT_MAX` без знака.
+/// @return Seed или `std::nullopt`, если строка не подходит.
+std::optional<unsigned int> parseSeed(const std::string& text);
+
 /// @brief Разбирает список целых через запятую, пустые элементы пропускаются.
 /// @return Список или `std::nullopt`, если хотя бы один элемент не является целым числом.
 std::optional<std::vector<int>> parseIntList(const std::string& csv);
@@ -51,6 +55,9 @@ int readIntUntilValid(const std::string& prompt, int minVal, int maxVal);
 
 /// @brief Спрашивает число из `[minVal, maxVal]`, пока пользователь не введёт корректное.
 double readDoubleUntilValid(const std::string& prompt, double minVal, double maxVal);
+
+/// @brief Спрашивает seed (от 0 до `UINT_MAX`), пока пользователь не введёт корректный.
+unsigned int readSeedUntilValid(const std::string& prompt);
 
 /// @brief Спрашивает `y` или `n`, пока не получит один из них.
 /// @return `true` для `y`, `false` для `n`.

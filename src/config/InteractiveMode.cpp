@@ -1,24 +1,23 @@
 #include "od/config/InteractiveMode.hpp"
 
+#include "od/config/ConfigInput.hpp"
+#include "od/config/Limits.hpp"
 #include "od/graph/GraphGenerator.hpp"
 #include "od/io/InputHelpers.hpp"
 
+#include <climits>
 #include <iostream>
 
 namespace od::config {
 
 namespace {
 
-const int MAX_STEPS = 100000;
-const int MAX_INTERACTIVE_SEED = 2147483647;
-
 void askStepsAndSeed(RuntimeParams& params) {
     params.tMax = od::io::readIntUntilValid(
         "Введите количество шагов симуляции (1.." + std::to_string(MAX_STEPS) + "): ", 1, MAX_STEPS);
 
     if (od::io::readYesNo("Задать seed вручную? (y - задать, n - случайный): ")) {
-        params.seed = static_cast<unsigned int>(od::io::readIntUntilValid(
-            "Введите seed (0.." + std::to_string(MAX_INTERACTIVE_SEED) + "): ", 0, MAX_INTERACTIVE_SEED));
+        params.seed = od::io::readSeedUntilValid("Введите seed (0.." + std::to_string(UINT_MAX) + "): ");
         params.seedSpecified = true;
     }
 }

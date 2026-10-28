@@ -53,16 +53,11 @@ std::vector<double> toDoubleList(const std::string& flag, const std::string& val
 }
 
 unsigned int toSeed(const std::string& flag, const std::string& value) {
-    std::string text = od::io::trim(value);
-    try {
-        size_t consumed = 0;
-        unsigned long long seed = std::stoull(text, &consumed);
-        if (!text.empty() && text[0] != '-' && consumed == text.size() && seed <= UINT_MAX) {
-            return static_cast<unsigned int>(seed);
-        }
-    } catch (...) {
+    std::optional<unsigned int> seed = od::io::parseSeed(value);
+    if (!seed.has_value()) {
+        throw badValue(flag, value, "целое от 0 до " + std::to_string(UINT_MAX));
     }
-    throw badValue(flag, value, "целое от 0 до " + std::to_string(UINT_MAX));
+    return *seed;
 }
 
 bool toManualMode(const std::string& flag, const std::string& value) {

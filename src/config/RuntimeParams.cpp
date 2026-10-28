@@ -1,5 +1,7 @@
 #include "od/config/RuntimeParams.hpp"
 
+#include "od/config/Limits.hpp"
+
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -7,8 +9,6 @@
 namespace od::config {
 
 namespace {
-
-const int MAX_STEPS = 100000;
 
 void checkFunction(const od::model::ProbabilityFunction& function, const std::string& title) {
     std::string error = od::model::validateFunction(function);
