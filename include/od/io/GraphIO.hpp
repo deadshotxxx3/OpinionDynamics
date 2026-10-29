@@ -20,18 +20,18 @@ namespace od::io {
  * начинают с 0, упрямые с 1.
  */
 struct SimulationParams {
-    unsigned int seed = 0;
-    int tMax = 0;
-    int numOpinions = od::model::DEFAULT_NUM_OPINIONS;
-    od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction();
-    od::model::ChoiceRule choiceRule = od::model::ChoiceRule::Proportional;
-    std::vector<int> popularity;
-    od::model::InitialOpinionSettings initialOpinions;
-    bool useWeights = false;
-    bool dynamicEdges = false;
-    od::model::ProbabilityFunction edgeAddFunction;
-    bool removeEdges = false;
-    od::model::ProbabilityFunction edgeRemoveFunction;
+    unsigned int seed = 0;                             ///< `SEED`
+    int tMax = 0;                                      ///< `T_MAX`
+    int numOpinions = od::model::DEFAULT_NUM_OPINIONS; ///< `NUM_OPINIONS`
+    od::model::OpinionFunction opinionFunction = od::model::defaultOpinionFunction(); ///< `OPINION_FUNCTION`
+    od::model::ChoiceRule choiceRule = od::model::ChoiceRule::Proportional;          ///< `CHOICE_RULE`
+    std::vector<int> popularity;                       ///< `POPULARITY`
+    od::model::InitialOpinionSettings initialOpinions; ///< `INITIAL_REGULAR`, `INITIAL_STUBBORN`, `INITIAL_MANUAL`
+    bool useWeights = false;                           ///< `USE_WEIGHTS`
+    bool dynamicEdges = false;                         ///< `DYNAMIC_EDGES`
+    od::model::ProbabilityFunction edgeAddFunction;    ///< `ADD_FUNCTION`
+    bool removeEdges = false;                          ///< `REMOVE_EDGES`
+    od::model::ProbabilityFunction edgeRemoveFunction; ///< `REMOVE_FUNCTION`
 };
 
 /// @brief Граф, прочитанный из файла, вместе с мнениями и параметрами, если они там есть.
@@ -42,7 +42,15 @@ struct GraphFile {
     SimulationParams params;   ///< Параметры из PARAMS, если `paramsLoaded`.
 };
 
+/// @brief Пишет функцию вероятности рёбер в виде `имя число_параметров параметры…`.
 void writeFunction(std::ostream& out, const od::model::ProbabilityFunction& function);
+
+/**
+ * @brief Читает функцию вероятности рёбер в виде `имя число_параметров параметры…`.
+ * @param in Поток, из которого читается функция.
+ * @param source Имя файла для сообщений об ошибках.
+ * @throws std::runtime_error Если функция не читается, неизвестна или некорректна.
+ */
 od::model::ProbabilityFunction readFunction(std::istream& in, const std::string& source);
 
 /// @brief Пишет функцию изменения мнений в виде `имя число_параметров параметры…`.

@@ -9,17 +9,18 @@
 
 namespace od::io {
 
-/// @brief Состояние после одного шага: число рёбер и сколько вершин держат каждое мнение.
+/// @brief Состояние после одного шага: число рёбер и сколько вершин с каждым мнением.
 struct StepRecord {
-    long long edges;
+    long long edges;                             ///< Число рёбер после шага.
     std::vector<od::model::OpinionCount> counts; ///< Только мнения, которые есть у вершин, от самого частого.
 };
 
+/// @brief Смена мнения одной вершины.
 struct OpinionChange {
-    int step;
-    int vertex;
-    int from;
-    int to;
+    int step;   ///< Номер шага, с 1.
+    int vertex; ///< Номер вершины.
+    int from;   ///< Мнение до шага.
+    int to;     ///< Мнение после шага.
 };
 
 /**
@@ -41,6 +42,10 @@ struct SimulationLog {
     std::vector<int> finalOpinions;
 };
 
+/**
+ * @brief Сохраняет лог прогона в текстовый файл.
+ * @throws std::runtime_error Если файл не открывается или запись не удалась.
+ */
 void saveSimulationLog(const SimulationLog& log, const std::string& filename);
 
 } // namespace od::io
